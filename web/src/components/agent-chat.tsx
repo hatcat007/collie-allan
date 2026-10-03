@@ -2603,9 +2603,11 @@ export function AgentChat({
             paneKey={`${scope?.host ?? ""}\0${scope?.session ?? ""}\0${paneId}`}
             host={{
               // Words, not the mirror's colour escapes: they would spend the model's character budget
-              // and a tail cut could land inside one. `logicalText` has no hard wraps.
+              // and a tail cut could land inside one. `logicalText` has no hard wraps. Read from the
+              // frozen snapshot like every other read here, so the model judges what the operator is
+              // LOOKING AT, never rows that arrived after they scrolled up.
               readPane: () =>
-                parseAnsi(logicalText || text)
+                parseAnsi(shown.logicalText || shown.text)
                   .map((segment) => segment.text)
                   .join(""),
               getDraft: () => composerRef.current?.getDraft() ?? "",
