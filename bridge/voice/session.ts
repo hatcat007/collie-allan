@@ -48,6 +48,8 @@ export type UpstreamFactory = (url: string) => UpstreamSocket;
 export const MAX_AUDIO_CHUNK_CHARS = 128 * 1024;
 /** Largest tool result accepted from the phone, serialised. A pane screen is far below this. */
 export const MAX_TOOL_RESULT_CHARS = 64 * 1024;
+/** Replacement connections tried after a GoAway before the retiring socket is left to run out. */
+export const MAX_RESUME_ATTEMPTS = 2;
 /** A session is cut here whatever else happens: an open microphone is not a standing service. */
 export const MAX_SESSION_MS = 60 * 60 * 1000;
 
@@ -85,6 +87,7 @@ export class VoiceRelay {
   private handle: string | undefined;
   private started = false;
   private mode: VoiceMode = "agent";
+  private resumeAttempts = 0;
   private ended = false;
   private ready = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -163,17 +166,11 @@ export class VoiceRelay {
         for (const event of parseServerFrame(frame)) this.onEvent(socket, event);
       },
       error: () => {
-        if (socket === this.pending) {
-          this.pending = null;
-          return;
-        }
+        if (socket === this.pending) return this.replacementFailed();
         if (!this.ended) this.fail("voice.upstream_unavailable");
       },
       close: () => {
-        if (socket === this.pending) {
-          this.pending = null;
-          return;
-        }
+        if (socket === this.pending) return this.replacementFailed();
         if (socket === this.upstream && !this.ended) this.fail("voice.upstream_closed");
       },
     });
@@ -187,6 +184,7 @@ export class VoiceRelay {
         const old = this.upstream;
         this.upstream = this.pending;
         this.pending = null;
+        this.resumeAttempts = 0;
         if (old !== null) {
           old.detach();
           old.close(1000, "resumed");
@@ -232,6 +230,18 @@ export class VoiceRelay {
         this.awaiting.set(event.call.id, event.call.name);
         return this.deliver({ t: "tool_call", id: event.call.id, name: event.call.name, args: event.call.args });
     }
+  }
+
+  /**
+   * The replacement opened for a GoAway failed before it came up. The conversation is still on the
+   * retiring socket, so try again while the handle is good; once the attempts are spent the old
+   * socket is left to close, which ends the session with its own code and tells the phone.
+   */
+  private replacementFailed(): void {
+    this.pending = null;
+    if (this.ended || this.handle === undefined || this.resumeAttempts >= MAX_RESUME_ATTEMPTS) return;
+    this.resumeAttempts += 1;
+    this.connect(true);
   }
 
   private deliver(message: VoiceClientMessage): void {

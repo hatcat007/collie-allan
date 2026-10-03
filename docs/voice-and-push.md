@@ -162,7 +162,7 @@ looks like this — is [ADR 0029](../.adr/0029-speech-to-text-is-a-provider-seam
 Talk to an agent with Gemini Live. It reads the pane, drafts a reply and sends it when you confirm.
 
 ```sh
-collie voice setup --key <gemini-api-key>
+collie voice setup
 collie voice test
 ```
 
@@ -170,9 +170,13 @@ collie voice test
 host. Setup takes effect on the running bridge with no restart. Get a key at
 [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 
-1. Run `collie voice setup --key <gemini-api-key>` on the machine that runs the bridge.
+1. Run `collie voice setup` on the machine that runs the bridge and paste the key at the prompt.
 2. Run `collie voice test` to open one real session and confirm the key and model work.
 3. Open a pane on the phone, tap the ⋮ menu, then **Voice mode**.
+
+The key is asked for at the prompt so it stays out of your shell history. For an unattended run,
+export `COLLIE_VOICE_KEY` first and run setup with no key flag. `--key` still works but prints a
+warning, because the flag is visible in the process list while the command runs.
 
 The sheet has two modes, chosen before you start:
 

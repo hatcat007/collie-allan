@@ -38,6 +38,29 @@ function deps(
 const said = (d: Deps): string => [...d.io.stdout, ...d.io.stderr].join("\n");
 
 describe("voice setup", () => {
+  test("the key can come from the environment, so it never has to be an argument", async () => {
+    const d = deps({ env: { [VOICE_ENV_KEYS.key]: "AIza-from-env" } });
+    expect(await cmdVoiceSetup(d, [])).toBe(EXIT.OK);
+    expect(JSON.parse(d.files.entries.get(CONFIG_PATH)?.text ?? "{}").apiKey).toBe("AIza-from-env");
+    expect(said(d)).not.toContain("warning");
+  });
+
+  test("--key still works but warns about arguments and shell history", async () => {
+    const d = deps();
+    expect(await cmdVoiceSetup(d, ["--key", "k"])).toBe(EXIT.OK);
+    expect(said(d)).toContain("warning: --key");
+    expect(said(d)).not.toContain("--key k");
+  });
+
+  test("an unknown flag or a stray word is refused, and nothing is written", async () => {
+    for (const args of [["--key", "k", "--modle", "gemini-3.8-live"], ["--key", "k", "extra"]]) {
+      const d = deps();
+      expect(await cmdVoiceSetup(d, args)).toBe(EXIT.USAGE);
+      expect(said(d)).toContain("unknown argument");
+      expect(d.files.entries.has(CONFIG_PATH)).toBe(false);
+    }
+  });
+
   test("writes an owner-only file, never echoing the key, and leaves defaults out", async () => {
     const d = deps();
     expect(await cmdVoiceSetup(d, ["--key", "AIza-secret-1234"])).toBe(EXIT.OK);

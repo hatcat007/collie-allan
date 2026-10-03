@@ -64,8 +64,12 @@ function keyLabel(apiKey: string): string {
   return apiKey.length <= 4 ? "set" : `set (…${apiKey.slice(-4)})`;
 }
 
+/** The only flags `setup` takes. Anything else is refused before a byte is written. */
+const SETUP_FLAGS: ReadonlySet<string> = new Set(["key", "model", "lang", "voice"]);
+
 const SETUP_USAGE = [
-  "usage: collie voice setup [--key <gemini-api-key>] [--model <id>]",
+  "usage: collie voice setup [--model <id>] [--lang <iso-639-1>] [--voice <name>]",
+  "       the key is asked for at the prompt, or read from COLLIE_VOICE_KEY (never from a flag by choice)",
   `                          [--lang <iso-639-1>] [--voice <name>]   (models: ${VOICE_MODELS.join(", ")})`,
 ];
 
@@ -84,16 +88,37 @@ async function ask(
 
 /** `collie voice setup` — take a Gemini key, prove the bridge would accept it, write `voice.json`. */
 export async function cmdVoiceSetup(deps: VoiceDeps, args: readonly string[]): Promise<number> {
-  const { flags } = parseCrewArgs(args, []);
+  const { flags, positional } = parseCrewArgs(args, []);
 
-  const key = await ask(deps, flags.key, "Gemini API key: ", [
+  // A typo such as `--modle` must not let setup succeed with the default model the operator meant to
+  // override, and in an unattended run nobody is there to notice. Refused before anything is written.
+  const unknown = [...Object.keys(flags).filter((name) => !SETUP_FLAGS.has(name)).map((n) => `--${n}`), ...positional];
+  if (unknown.length > 0) {
+    deps.io.err(`error: unknown argument${unknown.length === 1 ? "" : "s"}: ${unknown.join(" ")}. Nothing was written.`);
+    for (const line of SETUP_USAGE) deps.io.err(line);
+    return EXIT.USAGE;
+  }
+
+  // The key stays out of argv where it can: a flag is visible to `ps` while the command runs and sits
+  // in shell history afterwards. COLLIE_VOICE_KEY (exported from a secret store, or via
+  // `read -rs`) and the prompt both keep it out. `--key` still works, with a warning.
+  const fromEnv = deps.ctx.env[VOICE_ENV_KEYS.key]?.trim();
+  if (flags.key !== undefined) {
+    deps.io.err(
+      "warning: --key puts the key in this process's arguments and your shell history. " +
+        `Prefer the prompt, or export ${VOICE_ENV_KEYS.key} and run setup without the flag.`,
+    );
+  }
+  const key = await ask(deps, flags.key ?? (fromEnv === "" ? undefined : fromEnv), "Gemini API key: ", [
     "A Gemini API key (https://aistudio.google.com/apikey). Audio and screen text from the pane you",
     "talk about leave this machine for Google while a voice session is open.",
     `This terminal cannot read without echo, so what you type is visible; it lands in ${VOICE_FILENAME}`,
     "at mode 0600 and is never printed again.",
   ]);
   if (key === null || key === "") {
-    deps.io.err("error: a key is required — `collie voice setup --key <gemini-api-key>`. Nothing was written.");
+    deps.io.err(
+      `error: a key is required — run setup at a terminal, or export ${VOICE_ENV_KEYS.key} first. Nothing was written.`,
+    );
     return EXIT.FAIL;
   }
   const model = await ask(deps, flags.model, `model [${DEFAULT_VOICE_MODEL}]: `, [

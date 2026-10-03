@@ -13,7 +13,8 @@ import {
 function rig(over: { micDenied?: boolean; connectFails?: boolean; send?: () => Promise<ToolOutcome> } = {}) {
   const sent: VoiceClientMessage[] = [];
   const played: string[] = [];
-  const log = { flushed: 0, captureStopped: 0, closed: 0, transportClosed: 0 };
+  const log = { flushed: 0, captureStopped: 0, captureStarted: 0, closed: 0, transportClosed: 0 };
+  let denyOnce = false;
   const drafts: string[] = [];
   const dictations: string[] = [];
   const keys: string[] = [];
@@ -23,7 +24,11 @@ function rig(over: { micDenied?: boolean; connectFails?: boolean; send?: () => P
   let idle: (() => void) | null = null;
   const audio: VoiceAudio = {
     startCapture: async (cb) => {
-      if (over.micDenied) throw new Error("denied");
+      if (over.micDenied || denyOnce) {
+        denyOnce = false;
+        throw new Error("denied");
+      }
+      log.captureStarted += 1;
       chunk = cb;
     },
     stopCapture: () => void (log.captureStopped += 1),
@@ -56,6 +61,7 @@ function rig(over: { micDenied?: boolean; connectFails?: boolean; send?: () => P
     mic: (data: string, level = 0.1) => chunk?.(data, level),
     drain: () => idle?.(),
     drop: () => handlers?.closed(),
+    denyNext: () => void (denyOnce = true),
     tick: () => new Promise((r) => setTimeout(r, 0)),
   };
 }
@@ -142,6 +148,27 @@ describe("VoiceSession persona and audio", () => {
       ["you", "hej med dig"],
       ["agent", "Hej!"],
     ]);
+  });
+
+  test("mute closes the microphone itself, and unmute opens it again", async () => {
+    const r = await live();
+    const stopsBefore = r.log.captureStopped;
+    const opensBefore = r.log.captureStarted;
+    r.session.setMuted(true);
+    expect(r.log.captureStopped).toBe(stopsBefore + 1);
+    r.session.setMuted(false);
+    await r.tick();
+    expect(r.log.captureStarted).toBe(opensBefore + 1);
+    expect(r.session.snapshot().muted).toBe(false);
+  });
+
+  test("a microphone that fails to reopen after unmute ends the session as refused", async () => {
+    const r = await live();
+    r.session.setMuted(true);
+    r.denyNext();
+    r.session.setMuted(false);
+    await r.tick();
+    expect(r.session.snapshot()).toMatchObject({ phase: "ended", error: "voice.mic_denied" });
   });
 
   test("mute stops the microphone, tells the model, and shows idle", async () => {

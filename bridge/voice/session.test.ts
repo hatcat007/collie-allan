@@ -151,6 +151,35 @@ describe("VoiceRelay", () => {
     expect(r.ended()).toBe(1);
   });
 
+  test("a replacement that fails is retried while the handle is good, then left to the old socket", () => {
+    const r = ready();
+    r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });
+    r.sockets[0]?.push({ goAway: { timeLeft: { seconds: 20 } } });
+    expect(r.sockets).toHaveLength(2);
+    r.sockets[1]?.drop();
+    expect(r.sockets).toHaveLength(3);
+    r.sockets[2]?.drop();
+    expect(r.sockets).toHaveLength(4);
+    r.sockets[3]?.drop();
+    // Attempts spent: no fourth replacement, the session still runs on the retiring socket.
+    expect(r.sockets).toHaveLength(4);
+    expect(r.ended()).toBe(0);
+    r.sockets[0]?.drop();
+    expect(r.out.at(-2)).toEqual({ t: "error", code: "voice.upstream_closed" });
+  });
+
+  test("a retry that comes up swaps in and resets the budget", () => {
+    const r = ready();
+    r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });
+    r.sockets[0]?.push({ goAway: { timeLeft: { seconds: 20 } } });
+    r.sockets[1]?.drop();
+    r.sockets[2]?.open();
+    r.sockets[2]?.push({ setupComplete: {} });
+    expect(r.sockets[0]?.closed).toBe(true);
+    r.relay.onClientMessage({ t: "audio", data: "AAA=" });
+    expect(r.sockets[2]?.frames().at(-1)).toHaveProperty("realtimeInput.audio.data", "AAA=");
+  });
+
   test("goAway reconnects with the handle and swaps on setupComplete", () => {
     const r = ready();
     r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });

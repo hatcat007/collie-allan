@@ -68,8 +68,9 @@ PATH. Details and rollback: [`docs/upgrading.md`](./docs/upgrading.md) → *Upgr
 - **`collie voice setup` turns on a Gemini Live voice relay in the bridge.** The bridge opens one
   Gemini Live session per phone, holds the key in `voice.json` at mode 0600 and never sends it to the
   phone, and relays audio and the model's tool calls over a one-use-ticket WebSocket at `/api/voice`.
-  `collie voice test`, `status` and `off` complete the verb. It is off until you run setup, and the
-  default model is `gemini-3.8-live`.
+  Setup asks for the key at the prompt, or reads `COLLIE_VOICE_KEY`, and refuses unknown flags; a
+  ticket is refused if its device was revoked after it was minted. `collie voice test`, `status` and
+  `off` complete the verb. It is off until you run setup, and the default model is `gemini-3.8-live`.
 - **Voice mode on the phone: talk to an agent with the Persona avatar.** Open a pane's ⋮ menu and
   tap Voice mode (it appears once `collie voice setup` has run). Agent mode is a Gemini Live
   conversation that can read the pane, draft a reply and ask to send it or press a key, each behind

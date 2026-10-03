@@ -19,13 +19,24 @@ import type { VoiceAudio } from "./session";
 
 const WORKLET = "/voice-capture-worklet.js";
 
+/** What capture holds. Registered BEFORE the first await, so teardown can release a half-started one. */
+interface Capture {
+  stream: MediaStream | null;
+  context: AudioContext | null;
+  node: AudioWorkletNode | null;
+  detach: AbortController;
+}
+
+function release(held: Capture): void {
+  held.detach.abort();
+  held.node?.disconnect();
+  for (const track of held.stream?.getTracks() ?? []) track.stop();
+  void held.context?.close();
+}
+
 export function createVoiceAudio(): VoiceAudio {
-  let capture: {
-    context: AudioContext;
-    stream: MediaStream;
-    node: AudioWorkletNode;
-    detach: AbortController;
-  } | null = null;
+  let capture: Capture | null = null;
+  let closed = false;
   let speaker: AudioContext | null = null;
   let nextStart = 0;
   const active = new Set<AudioBufferSourceNode>();
@@ -33,10 +44,7 @@ export function createVoiceAudio(): VoiceAudio {
 
   const stopCapture = (): void => {
     if (capture === null) return;
-    capture.detach.abort();
-    capture.node.disconnect();
-    for (const track of capture.stream.getTracks()) track.stop();
-    void capture.context.close();
+    release(capture);
     capture = null;
   };
 
@@ -57,26 +65,41 @@ export function createVoiceAudio(): VoiceAudio {
 
   return {
     async startCapture(onChunk) {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
-      const context = new AudioContext();
-      await context.audioWorklet.addModule(mounted(WORKLET));
-      const node = new AudioWorkletNode(context, "collie-capture");
-      const detach = new AbortController();
-      node.port.addEventListener(
-        "message",
-        (event: MessageEvent<Float32Array>) => {
-          const mono = resample(event.data, context.sampleRate, CAPTURE_RATE);
-          onChunk(pcm16ToBase64(floatToPcm16(mono)), Math.min(1, rms(mono) * 4));
-        },
-        { signal: detach.signal },
-      );
-      // Required with addEventListener: a MessagePort queues until it is started, and only the
-      // `onmessage` setter starts it implicitly.
-      node.port.start();
-      context.createMediaStreamSource(stream).connect(node);
-      capture = { context, stream, node, detach };
+      if (closed) throw new Error("voice audio is closed");
+      const held: Capture = { stream: null, context: null, node: null, detach: new AbortController() };
+      capture = held;
+      // True once teardown has run (or a newer capture replaced this one) while an await was pending.
+      const superseded = (): boolean => capture !== held;
+      try {
+        held.stream = await navigator.mediaDevices.getUserMedia({
+          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
+        if (superseded()) throw new Error("capture stopped before the microphone opened");
+        held.context = new AudioContext();
+        const { context } = held;
+        await context.audioWorklet.addModule(mounted(WORKLET));
+        if (superseded()) throw new Error("capture stopped before the worklet loaded");
+        const node = new AudioWorkletNode(context, "collie-capture");
+        held.node = node;
+        node.port.addEventListener(
+          "message",
+          (event: MessageEvent<Float32Array>) => {
+            const mono = resample(event.data, context.sampleRate, CAPTURE_RATE);
+            onChunk(pcm16ToBase64(floatToPcm16(mono)), Math.min(1, rms(mono) * 4));
+          },
+          { signal: held.detach.signal },
+        );
+        // Required with addEventListener: a MessagePort queues until it is started, and only the
+        // `onmessage` setter starts it implicitly.
+        node.port.start();
+        context.createMediaStreamSource(held.stream).connect(node);
+      } catch (err) {
+        // Whatever was opened is released here: a refused permission, a worklet that failed to load
+        // and a teardown that raced the awaits all end with the microphone and the context shut.
+        release(held);
+        if (capture === held) capture = null;
+        throw err;
+      }
     },
     stopCapture,
     play(base64) {
@@ -106,6 +129,7 @@ export function createVoiceAudio(): VoiceAudio {
       idleCallback = callback;
     },
     close() {
+      closed = true;
       stopCapture();
       flush();
       void speaker?.close();

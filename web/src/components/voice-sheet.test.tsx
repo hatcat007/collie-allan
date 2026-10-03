@@ -143,6 +143,52 @@ describe("VoiceSheet", () => {
     expect(h.send).not.toHaveBeenCalled();
   });
 
+  it("a second request while one confirmation is open declines the first instead of stranding it", async () => {
+    const h = host();
+    await startLive(h);
+    await server({ t: "tool_call", id: "7", name: "send_reply", args: { text: "first" } });
+    await screen.findByText("first");
+    await server({ t: "tool_call", id: "8", name: "send_reply", args: { text: "second" } });
+    await screen.findByText("second");
+    await waitFor(() =>
+      expect(wire.sent.find((m) => m.t === "tool_result" && m.id === "7")).toMatchObject({
+        response: { result: "declined" },
+      }),
+    );
+    expect(h.send).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(h.send).toHaveBeenCalledWith("second"));
+  });
+
+  it("Stop declines a showing confirmation and removes it, so it cannot be tapped afterwards", async () => {
+    const h = host();
+    await startLive(h);
+    await server({ t: "tool_call", id: "9", name: "send_reply", args: { text: "x" } });
+    await screen.findByRole("alertdialog");
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    // The session is over, so there is no one to answer; the declined result is dropped with it.
+    await waitFor(() => expect(wire.closed).toBe(1));
+    expect(h.send).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
+  });
+
+  it("a double tap on a key confirmation presses once", async () => {
+    let finish: (ok: boolean) => void = () => {};
+    const h = host({ pressKey: vi.fn(() => new Promise<boolean>((resolve) => void (finish = resolve))) });
+    await startLive(h);
+    await server({ t: "tool_call", id: "10", name: "press_key", args: { key: "Enter" } });
+    const press = await screen.findByRole("button", { name: "Press" });
+    fireEvent.click(press);
+    fireEvent.click(press);
+    expect(h.pressKey).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Press" })).toBeDisabled();
+    finish(true);
+    await waitFor(() =>
+      expect(wire.sent.at(-1)).toEqual({ t: "tool_result", id: "10", response: { result: "sent" } }),
+    );
+  });
+
   it("a bridge error is shown in words and the session is over", async () => {
     await startLive(host());
     await server({ t: "error", code: "voice.upstream_unavailable" });

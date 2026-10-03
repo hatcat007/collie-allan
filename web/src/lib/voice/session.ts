@@ -160,12 +160,22 @@ export class VoiceSession {
     this.publish();
   }
 
-  /** Mute stops forwarding the microphone and flushes the model's voice detection. */
+  /**
+   * Mute CLOSES the microphone (stream, worklet and context), not just the forwarding, so the OS
+   * indicator goes out and "Muted" is true. It flushes the model's voice detection first. Unmuting
+   * opens it again; the permission is already granted, so there is no second prompt.
+   */
   setMuted(muted: boolean): void {
     if (this.snap.phase !== "live" || muted === this.snap.muted) return;
     this.snap = { ...this.snap, muted, level: 0 };
-    if (muted) this.transport?.send({ t: "end" });
+    if (muted) {
+      this.transport?.send({ t: "end" });
+      this.deps.audio.stopCapture();
+      this.publish();
+      return;
+    }
     this.publish();
+    void this.openMicrophone();
   }
 
   private onMessage(m: VoiceServerMessage): void {
@@ -214,6 +224,10 @@ export class VoiceSession {
   private async goLive(): Promise<void> {
     this.snap = { ...this.snap, phase: "live" };
     this.publish();
+    await this.openMicrophone();
+  }
+
+  private async openMicrophone(): Promise<void> {
     try {
       await this.deps.audio.startCapture((data, level) => {
         if (this.stopped || this.snap.muted) return;
@@ -224,7 +238,8 @@ export class VoiceSession {
         }
       });
     } catch {
-      this.fail("voice.mic_denied");
+      // A capture that failed because the session ended meanwhile is not a refusal.
+      if (!this.stopped) this.fail("voice.mic_denied");
     }
   }
 

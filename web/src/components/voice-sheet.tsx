@@ -52,6 +52,10 @@ export function VoiceSheet({ open, onClose, paneKey, host }: VoiceSheetProps) {
   const [mode, setMode] = useState<VoiceMode>("agent");
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const answer = useRef<((outcome: ToolOutcome) => void) | null>(null);
+  // True from the first tap on a confirmation until it settles: the buttons are disabled for that
+  // span and the handler refuses a second entry, so one intended Enter is never delivered twice.
+  const [confirming, setConfirming] = useState(false);
+  const taken = useRef(false);
   const hostRef = useRef(host);
   hostRef.current = host;
   // The draft as it stood when dictation began: dictated words are appended to it, replacing their
@@ -60,12 +64,19 @@ export function VoiceSheet({ open, onClose, paneKey, host }: VoiceSheetProps) {
 
   const ask = (what: Confirm): Promise<ToolOutcome> =>
     new Promise((resolve) => {
+      // The model may ask again before the operator answers. The earlier request is declined, never
+      // dropped: a resolver nobody calls is a tool call the model waits on forever.
+      answer.current?.({ status: "declined" });
       answer.current = resolve;
+      taken.current = false;
+      setConfirming(false);
       setConfirm(what);
     });
   const settle = (outcome: ToolOutcome) => {
     answer.current?.(outcome);
     answer.current = null;
+    taken.current = false;
+    setConfirming(false);
     setConfirm(null);
   };
 
@@ -108,9 +119,18 @@ export function VoiceSheet({ open, onClose, paneKey, host }: VoiceSheetProps) {
     voice.start(mode);
   };
 
+  const stop = () => {
+    // A confirmation belongs to the session that asked it; stopping ends both, so it cannot be
+    // tapped afterwards, or after the next session has started.
+    settle({ status: "declined" });
+    voice.stop();
+  };
+
   const confirmed = async () => {
     const pending = confirm;
-    if (pending === null) return;
+    if (pending === null || taken.current) return;
+    taken.current = true;
+    setConfirming(true);
     const ok =
       pending.kind === "send"
         ? await hostRef.current.send(pending.text)
@@ -176,10 +196,16 @@ export function VoiceSheet({ open, onClose, paneKey, host }: VoiceSheetProps) {
               <div className="font-content max-h-32 overflow-y-auto text-sm whitespace-pre-wrap">{confirm.text}</div>
             )}
             <div className="flex gap-2">
-              <Button type="button" className="flex-1" onClick={() => void confirmed()}>
+              <Button type="button" className="flex-1" disabled={confirming} onClick={() => void confirmed()}>
                 {confirm.kind === "send" ? t("voice.confirm.send") : t("voice.confirm.press")}
               </Button>
-              <Button type="button" variant="outline" className="flex-1" onClick={() => settle({ status: "declined" })}>
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                disabled={confirming}
+                onClick={() => settle({ status: "declined" })}
+              >
                 {t("voice.confirm.cancel")}
               </Button>
             </div>
@@ -189,7 +215,7 @@ export function VoiceSheet({ open, onClose, paneKey, host }: VoiceSheetProps) {
         <div className="flex w-full gap-2">
           {live ? (
             <>
-              <Button type="button" variant="outline" className="flex-1" onClick={voice.stop}>
+              <Button type="button" variant="outline" className="flex-1" onClick={stop}>
                 <Square className="size-4" />
                 {t("voice.stop")}
               </Button>
