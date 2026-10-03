@@ -8,20 +8,48 @@
 export const CAPTURE_RATE = 16_000;
 export const PLAYBACK_RATE = 24_000;
 
-/** Linear-interpolating resample. Identity when the rates match. */
+/**
+ * A linear-interpolating resampler that REMEMBERS WHERE IT WAS between blocks.
+ *
+ * The microphone arrives in 2048-sample blocks, and resampling each one from a fresh phase floors
+ * its length and jumps the waveform at every boundary: at 48 kHz that drops about two thirds of an
+ * output sample per block and adds a click per block. This one keeps the fractional read position
+ * and the last input sample, so a stream cut into any blocks resamples to the same samples as the
+ * stream resampled whole. Identity when the rates match.
+ */
+export function createResampler(inRate: number, outRate: number): (input: Float32Array) => Float32Array {
+  if (inRate === outRate) return (input) => input;
+  // The read position of output sample `produced` is produced * inRate / outRate. It is kept as an
+  // INTEGER NUMERATOR over `outRate`, so no float error accumulates across a long stream and the
+  // block boundary lands exactly where whole-stream resampling would put it.
+  let produced = 0;
+  let consumed = 0;
+  let previous: number | null = null;
+  return (input) => {
+    if (input.length === 0) return input;
+    const first = input[0] ?? 0;
+    previous ??= first;
+    // Virtual block [previous, ...input]: 0 is the last sample of the previous block, 1 is input[0].
+    const at = (i: number): number => (i === 0 ? (previous ?? first) : (input[i - 1] ?? 0));
+    const limit = input.length * outRate;
+    const out: number[] = [];
+    for (;;) {
+      const numerator = produced * inRate - consumed * outRate;
+      if (numerator >= limit) break;
+      const lo = Math.floor(numerator / outRate);
+      const frac = (numerator - lo * outRate) / outRate;
+      out.push(at(lo) * (1 - frac) + at(lo + 1) * frac);
+      produced += 1;
+    }
+    consumed += input.length;
+    previous = input.at(-1) ?? first;
+    return Float32Array.from(out);
+  };
+}
+
+/** One-shot resample of a whole buffer. Streams use {@link createResampler}. */
 export function resample(input: Float32Array, inRate: number, outRate: number): Float32Array {
-  if (inRate === outRate || input.length === 0) return input;
-  const ratio = inRate / outRate;
-  const length = Math.floor(input.length / ratio);
-  const out = new Float32Array(length);
-  for (let i = 0; i < length; i++) {
-    const at = i * ratio;
-    const lo = Math.floor(at);
-    const hi = Math.min(lo + 1, input.length - 1);
-    const frac = at - lo;
-    out[i] = (input[lo] ?? 0) * (1 - frac) + (input[hi] ?? 0) * frac;
-  }
-  return out;
+  return createResampler(inRate, outRate)(input);
 }
 
 /** Float32 in [-1, 1] to Int16, clamped. */
@@ -51,12 +79,27 @@ export function pcm16ToBase64(pcm: Int16Array): string {
   return btoa(binary);
 }
 
+/**
+ * A decoder for a STREAM of base64 PCM chunks. A chunk may end between the two bytes of a sample;
+ * the lone byte is held and prepended to the next chunk, so playback never loses it and never
+ * shifts every later sample by one byte.
+ */
+export function createPcm16Decoder(): (base64: string) => Int16Array {
+  let held: number | null = null;
+  return (base64) => {
+    const binary = atob(base64);
+    const lead = held === null ? 0 : 1;
+    const all = new Uint8Array(lead + binary.length);
+    if (held !== null) all[0] = held;
+    for (let i = 0; i < binary.length; i++) all[lead + i] = binary.charCodeAt(i);
+    held = all.length % 2 === 1 ? (all.at(-1) ?? null) : null;
+    return new Int16Array(all.buffer.slice(0, all.length - (all.length % 2)));
+  };
+}
+
+/** One-shot decode of a COMPLETE clip; a torn trailing byte is dropped. Streams use the decoder. */
 export function base64ToPcm16(base64: string): Int16Array {
-  const binary = atob(base64);
-  // An odd byte count is a torn frame; the trailing byte cannot be a sample.
-  const bytes = new Uint8Array(binary.length - (binary.length % 2));
-  for (let i = 0; i < bytes.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new Int16Array(bytes.buffer);
+  return createPcm16Decoder()(base64);
 }
 
 /** Root-mean-square level of a Float32 block, 0..1. Drives the "listening" meter. */

@@ -126,7 +126,7 @@ describe("VoiceRelay", () => {
     });
   });
 
-  test("an oversized audio chunk or a malformed message ends the session with a code", () => {
+  test("an oversized audio chunk ends the session with a code", () => {
     const r = ready();
     r.relay.onClientMessage({ t: "audio", data: "x".repeat(200_000) });
     expect(r.out.at(-2)).toEqual({ t: "error", code: "voice.bad_message" });
@@ -149,6 +149,59 @@ describe("VoiceRelay", () => {
     expect(r.sockets[0]?.closed).toBe(true);
     expect(r.out).toEqual([{ t: "ready" }]);
     expect(r.ended()).toBe(1);
+  });
+
+  test("a malformed message after ready ends the session with bad_message", () => {
+    const r = ready();
+    r.relay.onClientMessage({ t: "wat" });
+    expect(r.out.at(-2)).toEqual({ t: "error", code: "voice.bad_message" });
+    expect(r.out.at(-1)).toEqual({ t: "closed" });
+  });
+
+  test("the retiring socket closing mid-handshake does not take the replacement down", () => {
+    const r = ready();
+    r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });
+    r.sockets[0]?.push({ goAway: { timeLeft: { seconds: 20 } } });
+    r.sockets[0]?.drop();
+    expect(r.ended()).toBe(0);
+    r.sockets[1]?.open();
+    r.sockets[1]?.push({ setupComplete: {} });
+    r.relay.onClientMessage({ t: "audio", data: "AAA=" });
+    expect(r.sockets[1]?.frames().at(-1)).toHaveProperty("realtimeInput.audio.data", "AAA=");
+    expect(r.ended()).toBe(0);
+  });
+
+  test("if the replacement then fails for good, the session ends with the closed code", () => {
+    const r = ready();
+    r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });
+    r.sockets[0]?.push({ goAway: { timeLeft: { seconds: 20 } } });
+    r.sockets[0]?.drop();
+    r.sockets[1]?.drop();
+    r.sockets[2]?.drop();
+    r.sockets[3]?.drop();
+    expect(r.out.at(-2)).toEqual({ t: "error", code: "voice.upstream_closed" });
+    expect(r.ended()).toBe(1);
+  });
+
+  test("a GoAway that arrives before the first handle resumes when the handle arrives", () => {
+    const r = ready();
+    r.sockets[0]?.push({ goAway: { timeLeft: "20s" } });
+    expect(r.sockets).toHaveLength(1);
+    r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h1", resumable: true } });
+    expect(r.sockets).toHaveLength(2);
+    r.sockets[1]?.open();
+    expect(r.sockets[1]?.frames()[0]).toHaveProperty("setup.sessionResumption.handle", "h1");
+  });
+
+  test("a present but non-string mode is refused, an absent one defaults to agent", () => {
+    const bad = rig();
+    bad.relay.onClientMessage({ t: "start", mode: null });
+    expect(bad.out[0]).toEqual({ t: "error", code: "voice.bad_message" });
+    expect(bad.sockets).toHaveLength(0);
+    const ok = rig();
+    ok.relay.onClientMessage({ t: "start" });
+    ok.sockets[0]?.open();
+    expect(JSON.stringify(ok.sockets[0]?.frames()[0])).toContain("read_pane");
   });
 
   test("a replacement that fails is retried while the handle is good, then left to the old socket", () => {

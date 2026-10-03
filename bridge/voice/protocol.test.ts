@@ -42,6 +42,16 @@ describe("buildSetup", () => {
     expect(frame.setup.systemInstruction.parts[0].text).toContain("Never speak");
   });
 
+  test("agent mode pins the standing instruction and the compression that outlasts the 15-minute cap", () => {
+    const frame = JSON.parse(JSON.stringify(buildSetup(settings, "agent")));
+    const instruction: string = frame.setup.systemInstruction.parts[0].text;
+    expect(instruction).toContain("read_pane");
+    expect(instruction).toContain("Never guess what is on screen");
+    expect(instruction).toContain("send_reply only after they clearly ask");
+    expect(instruction).toContain("Never put words in the operator's mouth");
+    expect(frame.setup.contextWindowCompression).toEqual({ slidingWindow: {} });
+  });
+
   test("every declaration is NON_BLOCKING", () => {
     for (const d of VOICE_FUNCTION_DECLARATIONS) expect(d.behavior).toBe("NON_BLOCKING");
   });
@@ -97,6 +107,10 @@ describe("parseServerFrame", () => {
     expect(parseServerFrame({ goAway: { timeLeft: { seconds: 30 } } })).toEqual([
       { kind: "go_away", seconds: 30 },
     ]);
+    // What the wire really carries: a protobuf Duration as a string.
+    expect(parseServerFrame({ goAway: { timeLeft: "30s" } })).toEqual([{ kind: "go_away", seconds: 30 }]);
+    expect(parseServerFrame({ goAway: { timeLeft: "1.5s" } })).toEqual([{ kind: "go_away", seconds: 1.5 }]);
+    expect(parseServerFrame({ goAway: { timeLeft: "soon" } })).toEqual([{ kind: "go_away", seconds: null }]);
     expect(parseServerFrame({ sessionResumptionUpdate: { newHandle: "h", resumable: true } })).toEqual([
       { kind: "resumption", handle: "h" },
     ]);

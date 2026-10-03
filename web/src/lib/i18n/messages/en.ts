@@ -1013,7 +1013,7 @@ export const en = {
   "apiError.stt.empty": "That recording is empty.",
   "apiError.stt.provider_failed": "The transcription failed: {reason}",
   "apiError.voice.unconfigured": "Voice mode isn't set up on this collie.",
-  "apiError.voice.busy": "A voice session is already open — try again in a moment.",
+  "apiError.voice.busy": "Too many voice sessions were just started — try again in a moment.",
   "voice.row.label": "Voice mode",
   "voice.row.hint": "Talk to this agent",
   "voice.title": "Voice",

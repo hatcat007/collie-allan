@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   canonicalVoiceLanguage,
+  coerceVoiceFile,
   createVoiceSettingsReader,
   DEFAULT_VOICE_MODEL,
   resolveVoiceSettings,
@@ -55,6 +56,12 @@ describe("resolveVoiceSettings", () => {
     expect(w.seen[0]).toContain("gemini-9");
   });
 
+  test("an unknown provider warns and is off", () => {
+    const w = warnings();
+    expect(resolveVoiceSettings({ provider: "myspace", apiKey: "k" }, none, w.warn)).toBeNull();
+    expect(w.seen[0]).toContain("myspace");
+  });
+
   test("a language name is refused", () => {
     const w = warnings();
     expect(resolveVoiceSettings({ apiKey: "k", language: "danish" }, none, w.warn)).toBeNull();
@@ -70,8 +77,16 @@ describe("canonicalVoiceLanguage", () => {
   });
 });
 
+describe("coerceVoiceFile", () => {
+  test("a present field that is not a string is dropped with a warning, a blank one is not", () => {
+    const w = warnings();
+    expect(coerceVoiceFile({ apiKey: 123, model: "  ", language: null }, w.warn)).toEqual({});
+    expect(w.seen).toEqual(['"apiKey" in voice.json is not a string — ignored']);
+  });
+});
+
 describe("createVoiceSettingsReader", () => {
-  test("re-reads on mtime change and holds the last good file when it breaks", async () => {
+  test("a changed mtime is re-read, and a file turned broken is reported once and the last good one kept", async () => {
     let mtime: number | null = 1;
     let text = JSON.stringify({ apiKey: "a" });
     const w = warnings();
@@ -82,9 +97,13 @@ describe("createVoiceSettingsReader", () => {
       io: { mtime: async () => mtime, read: async () => text },
     });
     expect((await read())?.apiKey).toBe("a");
+    // The reload path: same reader, new mtime, new content.
     mtime = 2;
+    text = JSON.stringify({ apiKey: "b" });
+    expect((await read())?.apiKey).toBe("b");
+    mtime = 3;
     text = "{not json";
-    expect((await read())?.apiKey).toBe("a");
+    expect((await read())?.apiKey).toBe("b");
     expect(w.seen).toHaveLength(1);
     await read();
     expect(w.seen).toHaveLength(1);

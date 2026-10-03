@@ -1,6 +1,15 @@
 import { describe, expect, test } from "vitest";
 
-import { base64ToPcm16, floatToPcm16, pcm16ToBase64, pcm16ToFloat, resample, rms } from "./pcm";
+import {
+  base64ToPcm16,
+  createPcm16Decoder,
+  createResampler,
+  floatToPcm16,
+  pcm16ToBase64,
+  pcm16ToFloat,
+  resample,
+  rms,
+} from "./pcm";
 
 describe("pcm", () => {
   test("float to int16 clamps and hits the rails", () => {
@@ -16,7 +25,6 @@ describe("pcm", () => {
   test("base64 round-trips and drops a torn trailing byte", () => {
     const pcm = Int16Array.of(1, -2, 300, -400);
     expect([...base64ToPcm16(pcm16ToBase64(pcm))]).toEqual([1, -2, 300, -400]);
-    expect(base64ToPcm16(btoa("\u0001\u0000\u0002")).length).toBe(1);
   });
 
   test("base64 survives a clip longer than the argument limit", () => {
@@ -40,5 +48,36 @@ describe("pcm", () => {
     expect(rms(new Float32Array(10))).toBe(0);
     expect(rms(Float32Array.of(1, -1, 1, -1))).toBeCloseTo(1);
     expect(rms(new Float32Array(0))).toBe(0);
+  });
+
+  test("a stream resampled in blocks equals the same stream resampled whole", () => {
+    const whole = Float32Array.from({ length: 48_000 }, (_, i) => Math.sin(i / 7));
+    const expected = resample(whole, 48_000, 16_000);
+    const next = createResampler(48_000, 16_000);
+    const parts: number[] = [];
+    for (let at = 0; at < whole.length; at += 2048) parts.push(...next(whole.subarray(at, at + 2048)));
+    expect(Math.abs(parts.length - expected.length)).toBeLessThanOrEqual(1);
+    parts.slice(0, expected.length - 1).forEach((v, i) => expect(Math.abs(v - (expected[i] ?? 0))).toBeLessThan(1e-6));
+  });
+
+  test("blocks that do not divide the ratio lose no samples over a long stream", () => {
+    const next = createResampler(44_100, 16_000);
+    let total = 0;
+    for (let i = 0; i < 100; i++) total += next(new Float32Array(2048)).length;
+    expect(Math.abs(total - (100 * 2048 * 16_000) / 44_100)).toBeLessThanOrEqual(1);
+  });
+
+  test("the stream decoder carries a torn byte into the next chunk instead of dropping it", () => {
+    const pcm = Int16Array.of(258, -2, 300, -400);
+    const bytes = new Uint8Array(pcm.buffer);
+    const b64 = (u: Uint8Array) => btoa(String.fromCharCode(...u));
+    const decode = createPcm16Decoder();
+    const a = decode(b64(bytes.subarray(0, 3)));
+    const b = decode(b64(bytes.subarray(3, 8)));
+    expect([...a, ...b]).toEqual([258, -2, 300, -400]);
+  });
+
+  test("the one-shot decoder still drops a torn trailing byte", () => {
+    expect(base64ToPcm16(btoa("\u0001\u0000\u0002")).length).toBe(1);
   });
 });

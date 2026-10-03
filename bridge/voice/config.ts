@@ -77,16 +77,30 @@ function optionalString(value: JsonValue | undefined): string | undefined {
   return trimmed === "" ? undefined : trimmed;
 }
 
-/** Narrow the parsed file to the fields this module knows; anything else is dropped. */
-export function coerceVoiceFile(raw: JsonValue | undefined): RawSettings {
+/**
+ * Narrow the parsed file to the fields this module knows; anything else is dropped.
+ *
+ * A field that is PRESENT but not a usable string (`{"apiKey": 123}`) is dropped too, and `warn` says
+ * so: without it that file reads exactly like no file, and voice would turn off with no word about
+ * why. A blank string is an empty field, not a broken one, and stays quiet.
+ */
+export function coerceVoiceFile(raw: JsonValue | undefined, warn?: (message: string) => void): RawSettings {
   const o = jsonRecord(raw);
   if (o === null) return {};
+  const field = (name: string): string | undefined => {
+    const value = optionalString(o[name]);
+    const given = o[name];
+    if (value === undefined && given !== undefined && given !== null && jsonStringField(given) === null) {
+      warn?.(`"${name}" in ${VOICE_FILENAME} is not a string — ignored`);
+    }
+    return value;
+  };
   return {
-    provider: optionalString(o.provider),
-    apiKey: optionalString(o.apiKey),
-    model: optionalString(o.model),
-    language: optionalString(o.language),
-    voiceName: optionalString(o.voiceName),
+    provider: field("provider"),
+    apiKey: field("apiKey"),
+    model: field("model"),
+    language: field("language"),
+    voiceName: field("voiceName"),
   };
 }
 
@@ -180,7 +194,7 @@ export function createVoiceSettingsReader(opts: {
         try {
           // SAFETY: `JSON.parse` answers with a JSON value and `coerceVoiceFile` is its only reader;
           // every field it names is checked before it is believed.
-          file = coerceVoiceFile(JSON.parse(await io.read(path)) as JsonValue);
+          file = coerceVoiceFile(JSON.parse(await io.read(path)) as JsonValue, opts.warn);
         } catch (err) {
           opts.warn(`${path} could not be parsed (${String(err)}) — keeping the last good settings`);
         }

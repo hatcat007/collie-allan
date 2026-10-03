@@ -40,6 +40,7 @@ function host(over: Partial<VoiceHost> = {}): VoiceHost {
   return {
     readPane: () => "screen text",
     getDraft: () => "",
+    isLocked: () => false,
     setDraft: vi.fn(),
     send: vi.fn(async () => true),
     pressKey: vi.fn(async () => true),
@@ -118,6 +119,16 @@ describe("VoiceSheet", () => {
     await startLive(host({ locked: true }));
     await server({ t: "tool_call", id: "5", name: "send_reply", args: { text: "x" } });
     await waitFor(() => expect(wire.sent.at(-1)).toMatchObject({ id: "5", response: { result: "blocked" } }));
+  });
+
+  it("a composer that locked after the sheet drew blocks a send and a key at the moment they run", async () => {
+    const h = host({ isLocked: () => true });
+    await startLive(h);
+    await server({ t: "tool_call", id: "11", name: "send_reply", args: { text: "x" } });
+    await waitFor(() => expect(wire.sent.at(-1)).toMatchObject({ id: "11", response: { result: "blocked" } }));
+    await server({ t: "tool_call", id: "12", name: "press_key", args: { key: "Enter" } });
+    await waitFor(() => expect(wire.sent.at(-1)).toMatchObject({ id: "12", response: { result: "error" } }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
   it("dictation appends to the draft the operator already had and never plays or sends", async () => {

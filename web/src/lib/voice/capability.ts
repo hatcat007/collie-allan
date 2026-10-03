@@ -14,7 +14,13 @@ import type { VoiceCapability } from "@/lib/types";
 export function voiceSupported(): boolean {
   if (!globalThis.isSecureContext) return false;
   if (!navigator.mediaDevices?.getUserMedia) return false;
-  return "AudioWorkletNode" in globalThis && "AudioContext" in globalThis;
+  // The context-level worklet API is what capture actually calls, so that is what is asked for: a
+  // browser can expose both constructors and still have no `audioWorklet` on the context.
+  return (
+    "AudioWorkletNode" in globalThis &&
+    "AudioContext" in globalThis &&
+    "audioWorklet" in AudioContext.prototype
+  );
 }
 
 /** The bridge's voice block, or `null` when this phone must offer no voice row. */

@@ -2604,6 +2604,8 @@ export function AgentChat({
             host={{
               readPane: () => text,
               getDraft: () => composerRef.current?.getDraft() ?? "",
+              // Asked when a tool runs, so the composer's own live refusal state decides a send.
+              isLocked: () => composerRef.current?.isLocked() ?? true,
               setDraft: (draft) => composerRef.current?.setDraft(draft),
               send: async (reply) => (await composerRef.current?.sendText(reply)) === true,
               pressKey: async (key) => (await composerRef.current?.pressKey(key)) === true,

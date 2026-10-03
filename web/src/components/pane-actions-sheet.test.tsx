@@ -441,6 +441,20 @@ describe("PaneActionsSheet — pin", () => {
     expect(pin.compareDocumentPosition(rename) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("offers Voice mode only when handed a way to open it, and a tap closes the sheet first", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<PaneActionsSheet {...renderProps()} />);
+    expect(screen.queryByRole("button", { name: /Voice mode/ })).toBeNull();
+    unmount();
+    const onClose = vi.fn();
+    const onVoice = vi.fn();
+    render(<PaneActionsSheet {...renderProps({ onClose, onVoice })} />);
+    await user.click(screen.getByRole("button", { name: /Voice mode/ }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onVoice).toHaveBeenCalledTimes(1);
+    expect(onClose.mock.invocationCallOrder[0]).toBeLessThan(onVoice.mock.invocationCallOrder[0] ?? 0);
+  });
+
   it("pins, closes the sheet first, and hands the caller the new state", async () => {
     const user = userEvent.setup();
     const onPinChange = vi.fn();

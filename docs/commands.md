@@ -92,7 +92,7 @@ Collie registers these actions in `herdr-plugin.toml`. Invoke them with
 | `push-keys` | `collie push-keys` | Write a VAPID keypair into the `.env` the service reads |
 | `push-test` | `collie push-test` | Push one notification to every subscribed device |
 
-`qr`, `pair`, `devices`, `link`, `logs`, `stt`, and `config` have no corresponding plugin action
+`qr`, `pair`, `devices`, `link`, `logs`, `stt`, `voice`, and `config` have no corresponding plugin action
 because they require a terminal, positional arguments, or both. Run them as `collie <verb>`.
 
 **Herdr actions return Herdr's JSON envelope instead of the terminal banner.** View the action's

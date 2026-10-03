@@ -1,4 +1,5 @@
 import type { JsonObject } from "@/lib/json";
+import type { PersonaState } from "@/components/ai-elements/persona";
 import { asJsonString } from "@/lib/json";
 import {
   isVoiceToolName,
@@ -22,11 +23,29 @@ import {
 //  - A session never outlives its caller. `stop()` closes the socket, the microphone and the
 //    speaker, and no late frame can reopen any of them.
 
-export type PersonaState = "idle" | "listening" | "thinking" | "speaking" | "asleep";
+// One definition: the avatar's own. Type-only, so importing it pulls no Rive code into the app shell.
+export type { PersonaState };
 export type VoicePhase = "idle" | "connecting" | "live" | "ended";
 
-/** The two failures that happen on this phone before the bridge is involved. */
-export type VoiceLocalError = "voice.mic_denied" | "voice.ticket_failed";
+/** The failures that happen on this phone, or at the ticket, before a session exists. */
+export type VoiceLocalError =
+  | "voice.mic_denied"
+  | "voice.ticket_failed"
+  | "voice.unconfigured"
+  | "voice.busy";
+
+/**
+ * Thrown by a transport when no session could be opened, carrying WHICH failure it was so the sheet
+ * can say it: a bridge with no key and a bridge with too many tickets out are not "could not start".
+ */
+export class VoiceConnectError extends Error {
+  readonly code: VoiceLocalError;
+  constructor(code: VoiceLocalError) {
+    super(code);
+    this.name = "VoiceConnectError";
+    this.code = code;
+  }
+}
 
 export interface VoiceLine {
   id: number;
@@ -142,8 +161,8 @@ export class VoiceSession {
       }
       this.transport = transport;
       transport.send({ t: "start", mode });
-    } catch {
-      this.fail("voice.ticket_failed");
+    } catch (err) {
+      this.fail(err instanceof VoiceConnectError ? err.code : "voice.ticket_failed");
     }
   }
 

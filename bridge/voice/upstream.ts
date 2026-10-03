@@ -20,11 +20,17 @@ export const openGeminiSocket: UpstreamFactory = (url) => {
   };
   ws.addEventListener("open", () => handlers?.open());
   ws.addEventListener("message", (ev) => {
-    chain = chain.then(async () => {
-      const text = await new Response(ev.data).text();
-      handlers?.message(text);
-      return undefined;
-    });
+    // A frame that cannot be decoded or handled is reported through the relay's own error path, and
+    // the queue carries on: a rejected link here would silently drop every later frame.
+    chain = chain
+      .then(async () => {
+        const text = await new Response(ev.data).text();
+        handlers?.message(text);
+        return undefined;
+      })
+      .catch(() => {
+        handlers?.error();
+      });
   });
   ws.addEventListener("close", () => handlers?.close());
   ws.addEventListener("error", () => handlers?.error());

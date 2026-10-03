@@ -42,7 +42,7 @@ your column and keep it for the rest of the docs.
 
 A Herdr plugin is still the same `collie` binary; the actions forward to it
 ([Herdr actions](commands.md#herdr-actions)). A plugin install has no `collie` on your PATH, so
-the verbs that have no action (`pair`, `qr`, `logs`, `link`, `devices`, `stt`, `config`) run from
+the verbs that have no action (`pair`, `qr`, `logs`, `link`, `devices`, `stt`, `voice`, `config`) run from
 the plugin's directory as `bin/collie <verb>`.
 
 Herdr is also one of the three multiplexers Collie can mirror. Which one you mirror is a separate

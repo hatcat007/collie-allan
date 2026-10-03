@@ -26,6 +26,12 @@ export interface VoiceHost {
   /** The pane's current screen text. */
   readPane(): string;
   getDraft(): string;
+  /**
+   * The composer's LIVE refusal state, asked at the moment a tool runs. `locked` below is a render
+   * snapshot for the sheet's notice; this is what a send is judged by, so a pane that locked after
+   * the sheet drew (idle pause, a dialog) is refused here.
+   */
+  isLocked(): boolean;
   setDraft(text: string): void;
   /** The composer's own verified send. True only when the text was seen in the input box. */
   send(text: string): Promise<boolean>;
@@ -80,6 +86,8 @@ export function VoiceSheet({ open, onClose, paneKey, host }: VoiceSheetProps) {
     setConfirm(null);
   };
 
+  const lockedNow = (): boolean => hostRef.current.locked || hostRef.current.isLocked();
+
   const tools: VoiceTools = {
     readPane: () => hostRef.current.readPane(),
     draftReply: (text) => hostRef.current.setDraft(text),
@@ -87,9 +95,9 @@ export function VoiceSheet({ open, onClose, paneKey, host }: VoiceSheetProps) {
       const lead = base.current === "" || /\s$/.test(base.current) ? base.current : `${base.current} `;
       hostRef.current.setDraft(`${lead}${text}`);
     },
-    sendReply: (text) => (hostRef.current.locked ? Promise.resolve(blocked()) : ask({ kind: "send", text })),
+    sendReply: (text) => (lockedNow() ? Promise.resolve(blocked()) : ask({ kind: "send", text })),
     pressKey: (key) =>
-      KEYS.has(key) && !hostRef.current.locked
+      KEYS.has(key) && !lockedNow()
         ? ask({ kind: "key", key })
         : Promise.resolve({ status: "error", detail: "that key is not available" } satisfies ToolOutcome),
   };
@@ -278,6 +286,10 @@ function stateLabel(state: PersonaState): string {
 
 function errorKey(code: string) {
   switch (code) {
+    case "voice.unconfigured":
+      return "apiError.voice.unconfigured";
+    case "voice.busy":
+      return "apiError.voice.busy";
     case "voice.upstream_unavailable":
       return "voice.error.upstream_unavailable";
     case "voice.upstream_closed":

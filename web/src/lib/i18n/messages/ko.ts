@@ -927,7 +927,7 @@ export const ko: Dictionary = {
   "apiError.stt.empty": "녹음 데이터가 비어 있습니다.",
   "apiError.stt.provider_failed": "음성 변환에 실패했습니다: {reason}",
   "apiError.voice.unconfigured": "이 collie에는 음성 모드가 설정되어 있지 않습니다.",
-  "apiError.voice.busy": "이미 음성 세션이 열려 있습니다. 잠시 후 다시 시도하십시오.",
+  "apiError.voice.busy": "음성 세션이 짧은 시간에 너무 많이 시작되었습니다. 잠시 후 다시 시도하십시오.",
   "voice.row.label": "음성 모드",
   "voice.row.hint": "이 에이전트와 대화",
   "voice.title": "음성",

@@ -88,6 +88,10 @@ export class VoiceRelay {
   private started = false;
   private mode: VoiceMode = "agent";
   private resumeAttempts = 0;
+  /** A GoAway arrived before there was a handle to resume by; the replacement opens when one does. */
+  private goAwayWaiting = false;
+  /** The retiring socket closed while its replacement was still coming up. */
+  private retiredGone = false;
   private ended = false;
   private ready = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -112,8 +116,10 @@ export class VoiceRelay {
     const t = jsonStringField(o?.t);
     if (o === null || t === null) return this.fail("voice.bad_message");
     if (t === "start") {
-      const named = jsonStringField(o.mode) ?? "agent";
-      if (!isVoiceMode(named)) return this.fail("voice.bad_message");
+      // ABSENT means the default; a present mode that is not a known string (null, a number) is
+      // refused, never quietly upgraded to the more capable `agent` session.
+      const named = o.mode === undefined ? "agent" : jsonStringField(o.mode);
+      if (named === null || !isVoiceMode(named)) return this.fail("voice.bad_message");
       return this.start(named);
     }
     if (!this.ready) return;
@@ -171,7 +177,14 @@ export class VoiceRelay {
       },
       close: () => {
         if (socket === this.pending) return this.replacementFailed();
-        if (socket === this.upstream && !this.ended) this.fail("voice.upstream_closed");
+        if (socket !== this.upstream || this.ended) return;
+        // The retiring socket closing while its replacement is mid-handshake is the plan working,
+        // not a failure: leave the replacement to come up, and fail only if it cannot.
+        if (this.pending !== null) {
+          this.retiredGone = true;
+          return;
+        }
+        this.fail("voice.upstream_closed");
       },
     });
   }
@@ -185,6 +198,7 @@ export class VoiceRelay {
         this.upstream = this.pending;
         this.pending = null;
         this.resumeAttempts = 0;
+        this.retiredGone = false;
         if (old !== null) {
           old.detach();
           old.close(1000, "resumed");
@@ -210,10 +224,14 @@ export class VoiceRelay {
         return this.deliver({ t: "out_text", text: event.text });
       case "resumption":
         this.handle = event.handle;
+        // A GoAway that beat the first handle: resume now that there is one.
+        if (this.goAwayWaiting && this.pending === null) this.beginResume();
         return;
       case "go_away":
         // Reconnect ahead of the deadline, resuming by handle; the swap happens on setup_complete.
-        if (this.handle !== undefined && this.pending === null) this.connect(true);
+        // No handle yet: remember the GoAway and open the replacement when one arrives.
+        if (this.handle === undefined) this.goAwayWaiting = true;
+        else if (this.pending === null) this.beginResume();
         return;
       case "tool_cancelled":
         for (const id of event.ids) this.awaiting.delete(id);
@@ -239,8 +257,18 @@ export class VoiceRelay {
    */
   private replacementFailed(): void {
     this.pending = null;
-    if (this.ended || this.handle === undefined || this.resumeAttempts >= MAX_RESUME_ATTEMPTS) return;
-    this.resumeAttempts += 1;
+    if (this.ended) return;
+    if (this.handle !== undefined && this.resumeAttempts < MAX_RESUME_ATTEMPTS) {
+      this.resumeAttempts += 1;
+      this.connect(true);
+      return;
+    }
+    // No more attempts. If the old socket has already gone, there is nothing left to run on.
+    if (this.retiredGone) this.fail("voice.upstream_closed");
+  }
+
+  private beginResume(): void {
+    this.goAwayWaiting = false;
     this.connect(true);
   }
 

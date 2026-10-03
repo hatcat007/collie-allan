@@ -49,6 +49,7 @@ export const PRIVATE_ROOTS: readonly PrivateRoot[] = [
       "push-subscriptions.json",
       "standby-devices.json",
       "stt.json",
+      "voice.json",
     ],
     sourceNames: /\bstateDir\b|\buploadsDir\b|\bbeaconsDir\b/,
   },
@@ -95,6 +96,7 @@ const KNOWN_NAMES: ReadonlySet<string> = new Set([
   "update.json",
   "update.lock",
   "uploads",
+  "voice.json",
   // Config folder.
   ".env",
   "cache-rules.toml",

@@ -1,12 +1,12 @@
 import { mounted } from "@/lib/base-path";
 import {
-  base64ToPcm16,
   CAPTURE_RATE,
+  createPcm16Decoder,
+  createResampler,
   floatToPcm16,
   PLAYBACK_RATE,
   pcm16ToBase64,
   pcm16ToFloat,
-  resample,
   rms,
 } from "./pcm";
 import type { VoiceAudio } from "./session";
@@ -41,6 +41,8 @@ export function createVoiceAudio(): VoiceAudio {
   let nextStart = 0;
   const active = new Set<AudioBufferSourceNode>();
   let idleCallback: (() => void) | null = null;
+  // One decoder for the whole session: a chunk may end mid-sample, and the byte is carried over.
+  let decode = createPcm16Decoder();
 
   const stopCapture = (): void => {
     if (capture === null) return;
@@ -81,10 +83,12 @@ export function createVoiceAudio(): VoiceAudio {
         if (superseded()) throw new Error("capture stopped before the worklet loaded");
         const node = new AudioWorkletNode(context, "collie-capture");
         held.node = node;
+        // One resampler per capture: it carries its phase across the worklet's blocks.
+        const toCaptureRate = createResampler(context.sampleRate, CAPTURE_RATE);
         node.port.addEventListener(
           "message",
           (event: MessageEvent<Float32Array>) => {
-            const mono = resample(event.data, context.sampleRate, CAPTURE_RATE);
+            const mono = toCaptureRate(event.data);
             onChunk(pcm16ToBase64(floatToPcm16(mono)), Math.min(1, rms(mono) * 4));
           },
           { signal: held.detach.signal },
@@ -104,7 +108,7 @@ export function createVoiceAudio(): VoiceAudio {
     stopCapture,
     play(base64) {
       speaker ??= new AudioContext({ sampleRate: PLAYBACK_RATE });
-      const floats = pcm16ToFloat(base64ToPcm16(base64));
+      const floats = pcm16ToFloat(decode(base64));
       if (floats.length === 0) return;
       const buffer = speaker.createBuffer(1, floats.length, PLAYBACK_RATE);
       buffer.copyToChannel(floats, 0);
@@ -130,6 +134,7 @@ export function createVoiceAudio(): VoiceAudio {
     },
     close() {
       closed = true;
+      decode = createPcm16Decoder();
       stopCapture();
       flush();
       void speaker?.close();

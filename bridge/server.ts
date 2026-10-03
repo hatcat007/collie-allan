@@ -2119,7 +2119,7 @@ export function startServer(opts: {
       }
       if (pathname === "/api/voice" && req.method === "GET") {
         // Read-level for the host/origin checks; the write proof is the ticket the upgrade spends.
-        const denied = guard(req, cfg, "read");
+        const denied = guard(req, cfg, "read", pairing);
         if (denied) return denied;
         const settings = await voice();
         if (settings === null) return text("voice mode is not configured", 503);

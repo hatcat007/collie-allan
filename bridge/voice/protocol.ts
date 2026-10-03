@@ -85,6 +85,19 @@ function textOf(value: JsonValue | undefined): string | null {
   return text === null || text === "" ? null : text;
 }
 
+/**
+ * A protobuf `Duration` as JSON is the string `"30s"` (or `"1.5s"`); the object form `{seconds}` is
+ * accepted too, because that is what the docs spell. Null when it is neither.
+ */
+export function durationSeconds(value: JsonValue | undefined): number | null {
+  const text = jsonStringField(value);
+  if (text !== null) {
+    const match = /^(\d+(?:\.\d+)?)s$/.exec(text);
+    return match?.[1] === undefined ? null : Number(match[1]);
+  }
+  return jsonNumberField(jsonRecord(value)?.seconds);
+}
+
 /** Decode one server frame (already `JSON.parse`d) into events, in a stable order. */
 export function parseServerFrame(frame: JsonValue): LiveEvent[] {
   const o = jsonRecord(frame);
@@ -129,7 +142,7 @@ export function parseServerFrame(frame: JsonValue): LiveEvent[] {
 
   const goAway = jsonRecord(o.goAway);
   if (goAway !== null) {
-    events.push({ kind: "go_away", seconds: jsonNumberField(jsonRecord(goAway.timeLeft)?.seconds) });
+    events.push({ kind: "go_away", seconds: durationSeconds(goAway.timeLeft) });
   }
 
   const update = jsonRecord(o.sessionResumptionUpdate);

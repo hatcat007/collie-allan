@@ -942,7 +942,7 @@ export const es: Dictionary = {
   "apiError.stt.empty": "La grabación no contiene datos.",
   "apiError.stt.provider_failed": "Fallo en el servicio de transcripción: {reason}",
   "apiError.voice.unconfigured": "El modo de voz no está configurado en este collie.",
-  "apiError.voice.busy": "Ya hay una sesión de voz abierta. Reintente en un momento.",
+  "apiError.voice.busy": "Se iniciaron demasiadas sesiones de voz a la vez. Reintente en un momento.",
   "voice.row.label": "Modo de voz",
   "voice.row.hint": "Hablar con este agente",
   "voice.title": "Voz",

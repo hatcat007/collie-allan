@@ -147,7 +147,7 @@ export const ERROR_CODES = {
 
   // ── Voice mode: POST /api/voice/ticket (bridge/voice/) ─────────────────────────────
   "voice.unconfigured": "voice mode is not configured on this collie — run `collie voice setup`",
-  "voice.busy": "a voice session is already starting or open — try again in a moment",
+  "voice.busy": "too many voice sessions were just started — try again in a moment",
 
   // ── Device pairing: POST /api/pair, POST /api/devices/revoke ───────────────────────
   //

@@ -1,7 +1,7 @@
-import { voiceTicket } from "@/lib/api";
+import { apiErrorFields, voiceTicket } from "@/lib/api";
 import { mounted } from "@/lib/base-path";
 import { parseServerMessage } from "./protocol";
-import type { TransportHandlers, VoiceTransport } from "./session";
+import { type TransportHandlers, VoiceConnectError, type VoiceTransport } from "./session";
 
 // The phone's end of `GET /api/voice`: spend a freshly minted ticket on one WebSocket to the bridge.
 // The page never names Google; the bridge holds the key and relays (ADR 0081). The URL is derived
@@ -15,14 +15,37 @@ export function voiceSocketUrl(ticket: string, base: string = location.href): st
   return url.toString();
 }
 
+/** A handshake that has not completed by now is a black-holed link, not a slow one. */
+export const HANDSHAKE_TIMEOUT_MS = 10_000;
+
+/** Which ticket refusal this was, when the bridge said; any other failure is a plain start failure. */
+function ticketFailure(code: string | undefined): VoiceConnectError {
+  return new VoiceConnectError(code === "voice.unconfigured" || code === "voice.busy" ? code : "voice.ticket_failed");
+}
+
 export async function connectVoiceTransport(handlers: TransportHandlers): Promise<VoiceTransport> {
-  const ticket = await voiceTicket();
+  let ticket: string;
+  try {
+    ticket = await voiceTicket();
+  } catch (err) {
+    throw ticketFailure(apiErrorFields(err)?.code);
+  }
   const socket = new WebSocket(voiceSocketUrl(ticket));
-  await new Promise<void>((resolve, reject) => {
-    socket.addEventListener("open", () => resolve(), { once: true });
-    socket.addEventListener("error", () => reject(new Error("voice socket refused")), { once: true });
-    socket.addEventListener("close", () => reject(new Error("voice socket closed")), { once: true });
-  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error("voice socket handshake timed out")), HANDSHAKE_TIMEOUT_MS);
+      socket.addEventListener("open", () => resolve(), { once: true });
+      socket.addEventListener("error", () => reject(new Error("voice socket refused")), { once: true });
+      socket.addEventListener("close", () => reject(new Error("voice socket closed")), { once: true });
+    });
+  } catch {
+    // Closed whichever way it failed, so a socket that opens late finds nobody to talk to.
+    socket.close();
+    throw new VoiceConnectError("voice.ticket_failed");
+  } finally {
+    clearTimeout(timer);
+  }
   socket.addEventListener("message", (event) => {
     const message = parseServerMessage(String(event.data));
     if (message !== null) handlers.message(message);

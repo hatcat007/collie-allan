@@ -7,10 +7,13 @@ import {
   type VoiceAudio,
   type VoiceSnapshot,
   type VoiceTools,
+  VoiceConnectError,
   VoiceSession,
 } from "./session";
 
-function rig(over: { micDenied?: boolean; connectFails?: boolean; send?: () => Promise<ToolOutcome> } = {}) {
+function rig(
+  over: { micDenied?: boolean; connectFails?: boolean; connectError?: Error; send?: () => Promise<ToolOutcome> } = {},
+) {
   const sent: VoiceClientMessage[] = [];
   const played: string[] = [];
   const log = { flushed: 0, captureStopped: 0, captureStarted: 0, closed: 0, transportClosed: 0 };
@@ -47,6 +50,7 @@ function rig(over: { micDenied?: boolean; connectFails?: boolean; send?: () => P
   const snaps: VoiceSnapshot[] = [];
   const session = new VoiceSession({
     connect: async (h) => {
+      if (over.connectError) throw over.connectError;
       if (over.connectFails) throw new Error("no ticket");
       handlers = h;
       return { send: (m) => void sent.push(m), close: () => void (log.transportClosed += 1) };
@@ -87,6 +91,14 @@ describe("VoiceSession lifecycle", () => {
     const r = rig({ connectFails: true });
     await r.session.start("agent");
     expect(r.session.snapshot()).toMatchObject({ phase: "ended", error: "voice.ticket_failed", persona: "asleep" });
+  });
+
+  test("a ticket refusal that names its reason surfaces that reason, not a generic start failure", async () => {
+    for (const code of ["voice.unconfigured", "voice.busy"] as const) {
+      const r = rig({ connectError: new VoiceConnectError(code) });
+      await r.session.start("agent");
+      expect(r.session.snapshot()).toMatchObject({ phase: "ended", error: code });
+    }
   });
 
   test("a refused microphone ends the session and closes everything", async () => {

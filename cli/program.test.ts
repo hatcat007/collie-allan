@@ -5,6 +5,7 @@ import { CREW_SUBCOMMANDS } from "./crew.ts";
 import { DEVICES_SUBCOMMANDS } from "./pairing.ts";
 import { PUSH_SUBCOMMANDS } from "./push.ts";
 import { STT_SUBCOMMANDS } from "./stt.ts";
+import { VOICE_SUBCOMMANDS } from "./voice.ts";
 import { CONFIG_SUBCOMMANDS } from "./config.ts";
 import {
   type Command,
@@ -274,6 +275,10 @@ describe("the subcommand trees", () => {
 
   test("`config` declares exactly `cli/config.ts`'s sub-verbs, in its order", () => {
     expect(findCommand("config")?.subcommands?.map((s) => s.name)).toEqual([...CONFIG_SUBCOMMANDS]);
+  });
+
+  test("`voice` declares exactly `cli/voice.ts`'s sub-verbs, in its order", () => {
+    expect(findCommand("voice")?.subcommands?.map((s) => s.name)).toEqual([...VOICE_SUBCOMMANDS]);
   });
 
   test("no other verb declares a tree — the grammar is one level deep everywhere else", () => {
