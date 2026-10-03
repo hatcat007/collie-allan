@@ -7,7 +7,7 @@ import { VoiceSheet, type VoiceHost } from "./voice-sheet";
 // Persona is Rive + WebGL2, which jsdom has neither of. The state it is handed is asserted through
 // the stand-in, which is all the sheet owns.
 vi.mock("@/components/ai-elements/persona", () => ({
-  Persona: ({ state }: { state: string }) => <div data-testid="persona" data-state={state} />,
+  Persona: ({ state }: { state: string }) => <div role="img" aria-label={`persona ${state}`} />,
 }));
 
 interface Wire {
@@ -70,7 +70,7 @@ beforeEach(() => {
 describe("VoiceSheet", () => {
   it("starts a session in the chosen mode and shows Persona listening once live", async () => {
     await startLive(host());
-    await waitFor(() => expect(screen.getByTestId("persona")).toHaveAttribute("data-state", "listening"));
+    await waitFor(() => expect(screen.getByRole("img", { name: "persona listening" })).toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Agent" })).toBeDisabled();
   });
