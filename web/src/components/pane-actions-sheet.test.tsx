@@ -455,6 +455,11 @@ describe("PaneActionsSheet — pin", () => {
     expect(onClose.mock.invocationCallOrder[0]).toBeLessThan(onVoice.mock.invocationCallOrder[0] ?? 0);
   });
 
+  it("withholds Voice mode on a read-only device, where it could never send", () => {
+    render(<PaneActionsSheet {...renderProps({ onVoice: vi.fn(), readOnly: true })} />);
+    expect(screen.queryByRole("button", { name: /Voice mode/ })).toBeNull();
+  });
+
   it("pins, closes the sheet first, and hands the caller the new state", async () => {
     const user = userEvent.setup();
     const onPinChange = vi.fn();

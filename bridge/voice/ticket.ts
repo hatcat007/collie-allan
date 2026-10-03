@@ -16,13 +16,19 @@ export const MAX_OUTSTANDING_TICKETS = 8;
 
 export interface SpentTicket {
   device: string;
+  /**
+   * The identity the PROXY asserted when the ticket was minted (`COLLIE_DEVICE_HEADER`), or null when
+   * none was. The upgrade must show the same one, so a ticket lifted off one device cannot be spent
+   * from another the proxy would also admit.
+   */
+  binding: string | null;
   /** The pairing bearer token the ticket was minted under, or null when pairing was off. */
   token: string | null;
 }
 
 export interface TicketStore {
   /** A fresh ticket for this device, or null when too many are outstanding. */
-  mint(device: string, token: string | null): string | null;
+  mint(device: string, token: string | null, binding: string | null): string | null;
   /** Spend a ticket. Who it was minted for, or null when unknown, spent or expired. */
   consume(ticket: string): SpentTicket | null;
 }
@@ -39,11 +45,11 @@ export function createTicketStore(opts?: {
     for (const [ticket, row] of live) if (row.expires <= t) live.delete(ticket);
   };
   return {
-    mint(device, token) {
+    mint(device, token, binding) {
       sweep();
       if (live.size >= MAX_OUTSTANDING_TICKETS) return null;
       const ticket = random().replaceAll("-", "");
-      live.set(ticket, { device, token, expires: now() + TICKET_TTL_MS });
+      live.set(ticket, { device, token, binding, expires: now() + TICKET_TTL_MS });
       return ticket;
     },
     consume(ticket) {
@@ -51,7 +57,7 @@ export function createTicketStore(opts?: {
       const row = live.get(ticket);
       if (row === undefined) return null;
       live.delete(ticket);
-      return { device: row.device, token: row.token };
+      return { device: row.device, token: row.token, binding: row.binding };
     },
   };
 }

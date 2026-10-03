@@ -78,6 +78,11 @@ export interface TransportHandlers {
 }
 
 export interface VoiceAudio {
+  /**
+   * Unlock playback. Called synchronously on the Start tap, before any await: mobile browsers only
+   * let an audio context make sound if it was created or resumed inside a user gesture.
+   */
+  prime(): void;
   /** Start the microphone. Rejects when it is refused. */
   startCapture(onChunk: (base64: string, level: number) => void): Promise<void>;
   stopCapture(): void;
@@ -102,6 +107,8 @@ export interface VoiceTools {
   sendReply(text: string): Promise<ToolOutcome>;
   /** Ask the operator, then press one key. */
   pressKey(key: string): Promise<ToolOutcome>;
+  /** The model withdrew a call: drop any confirmation it is waiting on. */
+  cancelPending(): void;
 }
 
 export interface VoiceSessionDeps {
@@ -133,6 +140,8 @@ export class VoiceSession {
   private stopped = false;
   /** Which microphone start is current; an older one that fails after a mute or a restart is stale. */
   private micGeneration = 0;
+  /** Tool calls in flight, by id. A call the model cancelled is removed here and never answered. */
+  private readonly activeTools = new Map<string, string>();
 
   private readonly deps: VoiceSessionDeps;
 
@@ -150,6 +159,8 @@ export class VoiceSession {
 
   async start(mode: VoiceMode): Promise<void> {
     if (this.snap.phase !== "idle") return;
+    // First thing, before any await: this runs inside the Start tap's user activation.
+    this.deps.audio.prime();
     this.snap = { ...this.snap, phase: "connecting", mode, persona: "thinking" };
     this.deps.onChange(this.snap);
     try {
@@ -177,6 +188,7 @@ export class VoiceSession {
     this.transport = null;
     this.speaking = false;
     this.awaiting = false;
+    this.activeTools.clear();
     this.snap = { ...this.snap, phase: "ended", level: 0, tool: null };
     this.publish();
   }
@@ -234,6 +246,7 @@ export class VoiceSession {
         void this.runTool(m.id, m.name, m.args);
         return;
       case "tool_cancelled":
+        this.cancelTools(m.ids);
         return;
       case "error":
         this.fail(m.code);
@@ -293,6 +306,7 @@ export class VoiceSession {
       this.transport?.send({ t: "tool_result", id, response: { error: "unavailable" } });
       return;
     }
+    this.activeTools.set(id, name);
     this.snap = { ...this.snap, tool: name };
     this.publish();
     let response: JsonObject;
@@ -302,8 +316,25 @@ export class VoiceSession {
       response = { error: "failed" };
     }
     if (this.stopped) return;
-    this.snap = { ...this.snap, tool: null };
+    // Only if this call is still the model's: one it cancelled was dropped from `activeTools`, and
+    // answering it would hand the model a result for a request it no longer holds.
+    if (!this.activeTools.delete(id)) return;
+    this.snap = { ...this.snap, tool: this.lastActiveTool() };
     this.transport?.send({ t: "tool_result", id, response });
+    this.publish();
+  }
+
+  private lastActiveTool(): string | null {
+    return [...this.activeTools.values()].at(-1) ?? null;
+  }
+
+  /** The model withdrew these calls. Forget them, and drop any confirmation they were waiting on. */
+  private cancelTools(ids: readonly string[]): void {
+    let any = false;
+    for (const id of ids) any = this.activeTools.delete(id) || any;
+    if (!any) return;
+    this.deps.tools.cancelPending();
+    this.snap = { ...this.snap, tool: this.lastActiveTool() };
     this.publish();
   }
 

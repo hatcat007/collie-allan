@@ -80,4 +80,23 @@ describe("pcm", () => {
   test("the one-shot decoder still drops a torn trailing byte", () => {
     expect(base64ToPcm16(btoa("\u0001\u0000\u0002")).length).toBe(1);
   });
+
+  test("content above the new Nyquist is removed, not folded back into the band", () => {
+    const tone = (hz: number) => Float32Array.from({ length: 48_000 }, (_, i) => Math.sin((2 * Math.PI * hz * i) / 48_000));
+    const settle = (out: Float32Array) => out.subarray(200);
+    // 10 kHz is above 16 kHz / 2: unfiltered decimation would alias it to a full-strength 6 kHz.
+    const aliased = rms(settle(resample(tone(10_000), 48_000, 16_000)));
+    const kept = rms(settle(resample(tone(1_000), 48_000, 16_000)));
+    expect(kept).toBeGreaterThan(0.65);
+    expect(aliased).toBeLessThan(0.05);
+  });
+
+  test("the low-pass does not break block independence", () => {
+    const whole = Float32Array.from({ length: 24_000 }, (_, i) => Math.sin(i / 3) + Math.sin(i / 11));
+    const expected = resample(whole, 44_100, 16_000);
+    const next = createResampler(44_100, 16_000);
+    const parts: number[] = [];
+    for (let at = 0; at < whole.length; at += 1000) parts.push(...next(whole.subarray(at, at + 1000)));
+    parts.slice(0, expected.length - 2).forEach((v, i) => expect(Math.abs(v - (expected[i] ?? 0))).toBeLessThan(1e-5));
+  });
 });

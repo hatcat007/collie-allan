@@ -59,6 +59,7 @@ export function useVoiceSession(active: boolean, tools: VoiceTools): VoiceContro
           setDictation: (text) => toolsRef.current.setDictation(text),
           sendReply: (text) => toolsRef.current.sendReply(text),
           pressKey: (key) => toolsRef.current.pressKey(key),
+          cancelPending: () => toolsRef.current.cancelPending(),
         },
         onChange: setSnapshot,
       });

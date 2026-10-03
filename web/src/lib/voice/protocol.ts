@@ -13,6 +13,7 @@ export type VoiceErrorCode =
   | "voice.bad_message"
   | "voice.too_long";
 
+// MIRROR of `bridge/voice/tools.ts` (VOICE_TOOL_NAMES), pinned by `bridge/voice/tools.test.ts`.
 export const VOICE_TOOL_NAMES = ["read_pane", "draft_reply", "send_reply", "press_key"] as const;
 export type VoiceToolName = (typeof VOICE_TOOL_NAMES)[number];
 

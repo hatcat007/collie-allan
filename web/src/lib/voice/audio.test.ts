@@ -11,6 +11,10 @@ interface Tracks {
 }
 
 // The code under test calls only `getTracks()` and each track's `stop()`, so that is all this has.
+interface FakeNode {
+  connect?(to: FakeNode): FakeNode;
+}
+
 interface FakeStream {
   getTracks(): { stop(): void }[];
 }
@@ -22,17 +26,25 @@ function fakeStream(t: Tracks): FakeStream {
 let tracks: Tracks;
 let contextsClosed: number;
 let contextsOpened: number;
+let contextsResumed: number;
 let releaseMic: (() => void) | null;
 let rejectMic: ((e: Error) => void) | null;
 let failWorklet: boolean;
+let workletGate: Promise<void> | null;
+let openWorklet: (() => void) | null;
+const graph = { nodeConnected: 0 };
 
 beforeEach(() => {
   tracks = { stopped: 0 };
   contextsClosed = 0;
   contextsOpened = 0;
+  contextsResumed = 0;
   releaseMic = null;
   rejectMic = null;
   failWorklet = false;
+  workletGate = null;
+  openWorklet = null;
+  graph.nodeConnected = 0;
   vi.stubGlobal("navigator", {
     mediaDevices: {
       getUserMedia: () =>
@@ -48,14 +60,24 @@ beforeEach(() => {
       sampleRate = 48_000;
       audioWorklet = {
         addModule: async () => {
+          await workletGate;
           if (failWorklet) throw new Error("worklet 404");
         },
       };
       constructor() {
         contextsOpened += 1;
       }
+      destination = {};
+      state = "running";
       createMediaStreamSource() {
         return { connect: () => {} };
+      }
+      createGain() {
+        return { gain: { value: 1 }, connect: (to: FakeNode) => to };
+      }
+      resume() {
+        contextsResumed += 1;
+        return Promise.resolve();
       }
       close() {
         contextsClosed += 1;
@@ -67,6 +89,11 @@ beforeEach(() => {
     "AudioWorkletNode",
     class {
       port = { addEventListener: () => {}, start: () => {} };
+      connected = 0;
+      connect(to: FakeNode) {
+        graph.nodeConnected += 1;
+        return to;
+      }
       disconnect() {}
     },
   );
@@ -126,5 +153,36 @@ describe("createVoiceAudio capture teardown", () => {
     audio.stopCapture();
     expect(tracks.stopped).toBe(1);
     expect(contextsClosed).toBe(1);
+  });
+
+  test("the capture node is connected onward, or the graph would never run it", async () => {
+    const audio = createVoiceAudio();
+    const started = audio.startCapture(() => {});
+    releaseMic?.();
+    await started;
+    expect(graph.nodeConnected).toBe(1);
+  });
+
+  test("a stop that lands while the worklet loads closes the context exactly once", async () => {
+    workletGate = new Promise<void>((resolve) => void (openWorklet = resolve));
+    const audio = createVoiceAudio();
+    const started = audio.startCapture(() => {});
+    releaseMic?.();
+    await tick();
+    audio.stopCapture();
+    openWorklet?.();
+    await expect(started).rejects.toThrow();
+    expect(contextsClosed).toBe(1);
+    expect(tracks.stopped).toBe(1);
+  });
+
+  test("prime unlocks the speaker inside the gesture and is a no-op after close", () => {
+    const audio = createVoiceAudio();
+    audio.prime();
+    expect(contextsOpened).toBe(1);
+    expect(contextsResumed).toBe(1);
+    audio.close();
+    audio.prime();
+    expect(contextsOpened).toBe(1);
   });
 });

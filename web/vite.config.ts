@@ -332,6 +332,7 @@ export default defineConfig({
           ...precacheIgnoresFor(channel),
           // Voice mode's Persona chunk (Rive, ADR 0081) loads when the voice sheet first opens, like
           // the Nerd Font subsets above: a herd that never speaks should not pay for it on install.
+          // The glob keys on the chunk being NAMED for `persona.tsx`; src/persona-chunk.test.ts pins that.
           "**/persona-*.js",
         ],
       },

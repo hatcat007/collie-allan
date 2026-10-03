@@ -437,7 +437,7 @@ export function PaneActionsSheet({
               }}
             />
           )}
-          {onVoice && (
+          {onVoice && !readOnly && !hostBlock && (
             <ActionRow
               icon={<AudioLines className="size-4 shrink-0 text-muted-foreground" />}
               label={t("voice.row.label")}

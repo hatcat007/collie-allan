@@ -73,7 +73,7 @@ import type { CrewTlsOptions } from "./crew/transport.ts";
 import { createSttAdmission, MAX_STT_AUDIO_BYTES, sttCapability, transcribeRequest } from "./stt/http.ts";
 import type { SttProvider } from "./stt/provider.ts";
 import type { VoiceSettings } from "./voice/config.ts";
-import { createVoiceAdmission, spentTicketAdmitted, voiceCapability } from "./voice/http.ts";
+import { createVoiceAdmission, spentTicketAdmitted, spentTicketBound, voiceCapability } from "./voice/http.ts";
 import { createVoiceWebsocket, type VoiceSocketData } from "./voice/socket.ts";
 import { createTicketStore } from "./voice/ticket.ts";
 import { uploadTooLarge } from "./uploads.ts";
@@ -2113,7 +2113,11 @@ export function startServer(opts: {
         if ((await voice()) === null) {
           return jsonError(apiError("voice.unconfigured"), 503, req.headers.get("accept-encoding"));
         }
-        const ticket = voiceTickets.mint(whois(req).device ?? "", bearerToken(req.headers));
+        const ticket = voiceTickets.mint(
+          whois(req).device ?? "",
+          bearerToken(req.headers),
+          deviceAuth(req, cfg).device ?? null,
+        );
         if (ticket === null) return jsonError(apiError("voice.busy"), 429, req.headers.get("accept-encoding"));
         return json({ ticket }, req.headers.get("accept-encoding"));
       }
@@ -2127,7 +2131,11 @@ export function startServer(opts: {
         if (spent === null) return text("bad ticket", 403);
         // The write gate ran when the ticket was minted; run its two questions again now, so a
         // device revoked or de-listed inside the ticket's 30 seconds cannot still open a session.
-        if (!deviceAuth(req, cfg).authorized) return text("device not authorised", 403);
+        const upgradeAuth = deviceAuth(req, cfg);
+        if (!upgradeAuth.authorized) return text("device not authorised", 403);
+        // The ticket is bound to the identity the proxy asserted at mint: lifted off one device, it
+        // does not open a session from another.
+        if (!spentTicketBound(spent, upgradeAuth.device ?? null)) return text("ticket belongs to another device", 403);
         if (!spentTicketAdmitted(spent, pairing)) return text("device not paired", 403);
         const { device } = spent;
         const release = voiceAdmission.acquire();

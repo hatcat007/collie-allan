@@ -627,8 +627,10 @@ lint guard, the crew-wire guard or the `flake.lock` guard.
 
 `bridge/journal/` reads the agent's own session log off disk, per harness (`claude` / `codex` / `pi`,
 registered in `registry.ts`). Two other things touch the filesystem, and neither is an exception to
-the rule below: `stt.json` in the state dir when the operator ran `collie stt setup`
-([ADR 0029](./.adr/0029-speech-to-text-is-a-provider-seam-collie-owns.md)), and the operator's own
+the rule below: `stt.json` and `voice.json` in the state dir when the operator ran `collie stt setup`
+or `collie voice setup`
+([ADR 0029](./.adr/0029-speech-to-text-is-a-provider-seam-collie-owns.md),
+[ADR 0081](./.adr/0081-voice-mode-is-a-bridge-relay-and-the-csp-gains-one-wasm-word.md)), and the operator's own
 font files under `<config-dir>/fonts`, served read-only through `bridge/operator-fonts.ts`
 ([ADR 0033](./.adr/0033-the-app-face-is-a-device-preference.md)).
 
@@ -673,7 +675,8 @@ operator ran `collie stt setup` or `collie voice setup`.** Voice mode (`bridge/v
 key at 0600 and relays one ticketed WebSocket carrying microphone audio and pane text to Google. The
 phone never talks to Google, the bridge executes no tool, and the CSP gains only `'wasm-unsafe-eval'`
 for the Persona avatar ([ADR 0081](./.adr/0081-voice-mode-is-a-bridge-relay-and-the-csp-gains-one-wasm-word.md)).
-Speech-to-text (`bridge/stt/`, CLI `cli/stt.ts`) is a registered
+That one word is the exception to "declined by doing nothing": it ships in every response's CSP,
+voice configured or not. Speech-to-text (`bridge/stt/`, CLI `cli/stt.ts`) is a registered
 provider seam, absent until that verb writes `stt.json`: it then holds a provider credential at 0600,
 opens an operator-configured outbound path carrying microphone audio, and on the `codex` provider
 spawns a `codex app-server` child. All three costs are declined by doing nothing, the local-engine

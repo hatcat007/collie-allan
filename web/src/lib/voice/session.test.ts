@@ -16,7 +16,7 @@ function rig(
 ) {
   const sent: VoiceClientMessage[] = [];
   const played: string[] = [];
-  const log = { flushed: 0, captureStopped: 0, captureStarted: 0, closed: 0, transportClosed: 0 };
+  const log = { flushed: 0, captureStopped: 0, captureStarted: 0, closed: 0, transportClosed: 0, primed: 0, cancelled: 0 };
   let denyOnce = false;
   let hold = false;
   let failHeld: (() => void) | null = null;
@@ -42,17 +42,19 @@ function rig(
       chunk = cb;
     },
     stopCapture: () => void (log.captureStopped += 1),
+    prime: () => void (log.primed += 1),
     play: (d) => void played.push(d),
     flush: () => void (log.flushed += 1),
     onIdle: (cb) => void (idle = cb),
     close: () => void (log.closed += 1),
   };
   const tools: VoiceTools = {
-    readPane: () => "x".repeat(20_000),
+    readPane: () => `HEAD${"x".repeat(20_000)}TAIL`,
     draftReply: (t) => void drafts.push(t),
     setDictation: (t) => void dictations.push(t),
     sendReply: over.send ?? (async (t) => (sends.push(t), { status: "sent" })),
     pressKey: async (k) => (keys.push(k), { status: "sent" }),
+    cancelPending: () => void (log.cancelled += 1),
   };
   const snaps: VoiceSnapshot[] = [];
   const session = new VoiceSession({
@@ -100,6 +102,12 @@ describe("VoiceSession lifecycle", () => {
     const r = rig({ connectFails: true });
     await r.session.start("agent");
     expect(r.session.snapshot()).toMatchObject({ phase: "ended", error: "voice.ticket_failed", persona: "asleep" });
+  });
+
+  test("playback is unlocked synchronously on start, before the first await", () => {
+    const r = rig();
+    void r.session.start("agent");
+    expect(r.log.primed).toBe(1);
   });
 
   test("a ticket refusal that names its reason surfaces that reason, not a generic start failure", async () => {
@@ -249,7 +257,11 @@ describe("VoiceSession tools", () => {
     await r.tick();
     const res = r.sent.at(-1);
     expect(res).toMatchObject({ t: "tool_result", id: "1" });
-    expect(res?.t === "tool_result" && String(res.response.screen).length).toBe(12_000);
+    const screen = res?.t === "tool_result" ? String(res.response.screen) : "";
+    expect(screen).toHaveLength(12_000);
+    // The TAIL of the screen: a regression to `slice(0, N)` would start with HEAD instead.
+    expect(screen.endsWith("TAIL")).toBe(true);
+    expect(screen.startsWith("HEAD")).toBe(false);
   });
 
   test("draft_reply drafts and send_reply waits for the tool's own confirmation", async () => {
@@ -290,6 +302,34 @@ describe("VoiceSession tools", () => {
     await d.tick();
     expect(d.sends).toEqual([]);
     expect(d.sent.at(-1)).toEqual({ t: "tool_result", id: "y", response: { error: "unavailable" } });
+  });
+
+  test("a cancelled call is dropped, its confirmation declined, and it is never answered", async () => {
+    let release: (o: ToolOutcome) => void = () => {};
+    const r = await live("agent", { send: () => new Promise((res) => void (release = res)) });
+    r.server({ t: "tool_call", id: "c1", name: "send_reply", args: { text: "x" } });
+    await r.tick();
+    expect(r.session.snapshot().tool).toBe("send_reply");
+    r.server({ t: "tool_cancelled", ids: ["c1"] });
+    expect(r.log.cancelled).toBe(1);
+    expect(r.session.snapshot().tool).toBeNull();
+    release({ status: "declined" });
+    await r.tick();
+    expect(r.sent.some((m) => m.t === "tool_result" && m.id === "c1")).toBe(false);
+  });
+
+  test("two calls in flight: one finishing does not clear the other's waiting state", async () => {
+    const releases: ((o: ToolOutcome) => void)[] = [];
+    const r = await live("agent", { send: () => new Promise((res) => void releases.push(res)) });
+    r.server({ t: "tool_call", id: "a", name: "send_reply", args: { text: "1" } });
+    r.server({ t: "tool_call", id: "b", name: "send_reply", args: { text: "2" } });
+    await r.tick();
+    releases[0]?.({ status: "sent" });
+    await r.tick();
+    expect(r.session.snapshot().tool).toBe("send_reply");
+    releases[1]?.({ status: "sent" });
+    await r.tick();
+    expect(r.session.snapshot().tool).toBeNull();
   });
 
   test("a throwing tool answers with an error instead of hanging the model", async () => {

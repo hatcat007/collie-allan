@@ -23,6 +23,10 @@ export function isVoiceMode(value: string): value is VoiceMode {
   return VOICE_MODES.some((known) => known === value);
 }
 
+// MIRRORED on the phone, and pinned there by `tools.test.ts`: `web/src/lib/voice/protocol.ts` holds
+// the tool names it will run, and `web/src/components/voice-sheet.tsx` the keys it will press. These
+// are closed lists on purpose, and a name added on one side only is advertised to the model and then
+// refused by the phone, which ends that turn without a word. Change all three together.
 export const VOICE_TOOL_NAMES = ["read_pane", "draft_reply", "send_reply", "press_key"] as const;
 export type VoiceToolName = (typeof VOICE_TOOL_NAMES)[number];
 

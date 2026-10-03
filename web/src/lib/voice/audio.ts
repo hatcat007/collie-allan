@@ -29,9 +29,15 @@ interface Capture {
 
 function release(held: Capture): void {
   held.detach.abort();
-  held.node?.disconnect();
-  for (const track of held.stream?.getTracks() ?? []) track.stop();
-  void held.context?.close();
+  // Every part is cleared as it is let go, so a second release (a stop that lands in an await, then
+  // the setup's own catch) finds nothing left to stop or close: no second `close()` to reject.
+  const { node, stream, context } = held;
+  held.node = null;
+  held.stream = null;
+  held.context = null;
+  node?.disconnect();
+  for (const track of stream?.getTracks() ?? []) track.stop();
+  void context?.close();
 }
 
 export function createVoiceAudio(): VoiceAudio {
@@ -96,6 +102,11 @@ export function createVoiceAudio(): VoiceAudio {
         // Required with addEventListener: a MessagePort queues until it is started, and only the
         // `onmessage` setter starts it implicitly.
         node.port.start();
+        // The graph is only pulled from its destination, so a capture node with no path to one is
+        // never run and posts nothing. A zero-gain sink gives it that path and plays silence.
+        const sink = context.createGain();
+        sink.gain.value = 0;
+        node.connect(sink).connect(context.destination);
         context.createMediaStreamSource(held.stream).connect(node);
       } catch (err) {
         // Whatever was opened is released here: a refused permission, a worklet that failed to load
@@ -106,8 +117,17 @@ export function createVoiceAudio(): VoiceAudio {
       }
     },
     stopCapture,
+    prime() {
+      // Called synchronously from the Start tap. Mobile browsers only let a context make sound if
+      // it was created or resumed inside a user gesture, and the model's first audio arrives long
+      // after the tap, so the speaker is made and unlocked here, not on first play.
+      if (closed) return;
+      speaker ??= new AudioContext({ sampleRate: PLAYBACK_RATE });
+      void speaker.resume();
+    },
     play(base64) {
       speaker ??= new AudioContext({ sampleRate: PLAYBACK_RATE });
+      if (speaker.state === "suspended") void speaker.resume();
       const floats = pcm16ToFloat(decode(base64));
       if (floats.length === 0) return;
       const buffer = speaker.createBuffer(1, floats.length, PLAYBACK_RATE);

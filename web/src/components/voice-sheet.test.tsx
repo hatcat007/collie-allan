@@ -27,6 +27,7 @@ vi.mock("@/lib/voice/transport", () => ({
 
 vi.mock("@/lib/voice/audio", () => ({
   createVoiceAudio: (): VoiceAudio => ({
+    prime: () => {},
     startCapture: async () => {},
     stopCapture: () => {},
     play: () => {},
@@ -220,6 +221,35 @@ describe("VoiceSheet", () => {
     await waitFor(() =>
       expect(wire.sent.at(-1)).toEqual({ t: "tool_result", id: "10", response: { result: "sent" } }),
     );
+  });
+
+  it("a session that ends on its own takes its confirmation with it", async () => {
+    const h = host();
+    await startLive(h);
+    await server({ t: "tool_call", id: "30", name: "send_reply", args: { text: "x" } });
+    await screen.findByRole("alertdialog", { name: "Send this to the agent?" });
+    await server({ t: "error", code: "voice.upstream_closed" });
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(h.send).not.toHaveBeenCalled();
+  });
+
+  it("a call the model cancels takes its confirmation with it", async () => {
+    await startLive(host());
+    await server({ t: "tool_call", id: "31", name: "send_reply", args: { text: "x" } });
+    await screen.findByRole("alertdialog");
+    await server({ t: "tool_cancelled", ids: ["31"] });
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  });
+
+  it("moving to another pane ends the session", async () => {
+    const h = host();
+    const { rerender } = render(<VoiceSheet open onClose={vi.fn()} paneKey="p1" host={h} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(wire.sent[0]).toBeDefined());
+    await server({ t: "ready" });
+    rerender(<VoiceSheet open onClose={vi.fn()} paneKey="p2" host={h} />);
+    await waitFor(() => expect(wire.closed).toBe(1));
+    expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
   });
 
   it("a bridge error is shown in words and the session is over", async () => {

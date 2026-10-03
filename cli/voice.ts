@@ -69,8 +69,7 @@ const SETUP_FLAGS: ReadonlySet<string> = new Set(["key", "model", "lang", "voice
 
 const SETUP_USAGE = [
   "usage: collie voice setup [--model <id>] [--lang <iso-639-1>] [--voice <name>]",
-  "       the key is asked for at the prompt, or read from COLLIE_VOICE_KEY (never from a flag by choice)",
-  `                          [--lang <iso-639-1>] [--voice <name>]   (models: ${VOICE_MODELS.join(", ")})`,
+  `       models: ${VOICE_MODELS.join(", ")}. The key is asked for at the prompt, or read from ${VOICE_ENV_KEYS.key}.`,
 ];
 
 async function ask(
@@ -274,10 +273,13 @@ export function cmdVoiceOff(deps: VoiceDeps): number {
     deps.io.err(`error: could not remove ${path} — ${err instanceof Error ? err.message : String(err)}`);
     return EXIT.FAIL;
   }
+  // The environment outranks the file, so removing the file turns voice off only when no
+  // COLLIE_VOICE_* variable is set. Say exactly what happened, then what is still true.
+  const stillOn = liveEnvKeys(deps.ctx).length > 0;
   deps.io.out(
     existed
-      ? `✓ removed ${path} — voice mode is off from the next request (no restart needed).`
-      : `voice mode was already off — no ${path} to remove.`,
+      ? `✓ removed ${path}.${stillOn ? "" : " Voice mode is off from the next request (no restart needed)."}`
+      : `no ${path} to remove.${stillOn ? "" : " Voice mode was already off."}`,
   );
   reportEnvOverrides(deps, "off");
   return EXIT.OK;

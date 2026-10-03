@@ -150,6 +150,17 @@ describe("voice status and off", () => {
     expect(cmdVoiceOff(d)).toBe(EXIT.OK);
     expect(said(d)).toContain("already off");
   });
+
+  test("off does not claim voice is off while the environment still configures it", async () => {
+    const d = deps({ env: { [VOICE_ENV_KEYS.key]: "AIza-env" } });
+    await cmdVoiceSetup(d, ["--key", "k"]);
+    d.io.stdout.length = 0;
+    expect(cmdVoiceOff(d)).toBe(EXIT.OK);
+    const out = said(d);
+    expect(out).toContain("removed");
+    expect(out).not.toContain("Voice mode is off");
+    expect(out).toContain(VOICE_ENV_KEYS.key);
+  });
 });
 
 class ScriptedSocket implements UpstreamSocket {

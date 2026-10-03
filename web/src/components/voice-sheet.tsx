@@ -1,4 +1,4 @@
-import { lazy, Suspense, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Mic, MicOff, Square } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -40,7 +40,10 @@ export interface VoiceHost {
   locked: boolean;
 }
 
-/** Keys the model may ask for. Closed here as well as in the bridge's declaration. */
+/**
+ * Keys the model may ask for. Closed here as well as in the bridge's declaration, which this MIRRORS
+ * (`VOICE_KEYS` in `bridge/voice/tools.ts`); `bridge/voice/tools.test.ts` pins the two together.
+ */
 const KEYS = new Set(["Enter", "Escape", "Up", "Down", "Tab"]);
 
 type Confirm = { kind: "send"; text: string } | { kind: "key"; key: string };
@@ -84,13 +87,14 @@ export function VoiceSheet({ open, onClose, paneKey, host }: VoiceSheetProps) {
       setConfirm(what);
     });
   };
-  const settle = (outcome: ToolOutcome) => {
+  // Stable: it touches only refs and state setters, so effects can depend on it without re-running.
+  const settle = useCallback((outcome: ToolOutcome) => {
     answer.current?.(outcome);
     answer.current = null;
     taken.current = false;
     setConfirming(false);
     setConfirm(null);
-  };
+  }, []);
 
   const lockedNow = (): boolean => hostRef.current.locked || hostRef.current.isLocked();
 
@@ -106,21 +110,39 @@ export function VoiceSheet({ open, onClose, paneKey, host }: VoiceSheetProps) {
       KEYS.has(key) && !lockedNow()
         ? ask({ kind: "key", key })
         : Promise.resolve({ status: "error", detail: "that key is not available" } satisfies ToolOutcome),
+    // The model withdrew the call. A confirmation already mid-action keeps going: it is the
+    // operator's confirmed act, and `settle` is idempotent for it.
+    cancelPending: () => {
+      if (!taken.current) settle({ status: "declined" });
+    },
   };
 
   const voice = useVoiceSession(open, tools);
-  const { snapshot } = voice;
+  const { snapshot, stop: stopVoice } = voice;
   const live = snapshot.phase === "connecting" || snapshot.phase === "live";
   const stateWord =
     snapshot.phase === "connecting" ? t("voice.state.connecting") : stateLabel(snapshot.persona);
 
-  // The paneKey is read only to end the session when it changes; React compares it for us.
-  const lastPane = useRef(paneKey);
-  if (lastPane.current !== paneKey) {
-    lastPane.current = paneKey;
+  // A confirmation belongs to its session. When the session ends for ANY reason (the bridge dropped
+  // it, the microphone was refused, the page was hidden) the card goes with it, so it cannot be
+  // tapped afterwards and no tool call is left waiting on it.
+  const ended = snapshot.phase === "ended";
+  useEffect(() => {
+    if (ended) settle({ status: "declined" });
+  }, [ended, settle]);
+
+  // Moving to another pane ends the session. An effect, not a render-time call: closing a socket and
+  // setting state from a render React may throw away is how a session ends up closed by a render that
+  // never committed.
+  const firstPane = useRef(true);
+  useEffect(() => {
+    if (firstPane.current) {
+      firstPane.current = false;
+      return;
+    }
     settle({ status: "declined" });
-    voice.stop();
-  }
+    stopVoice();
+  }, [paneKey, settle, stopVoice]);
 
   const close = () => {
     settle({ status: "declined" });
@@ -202,7 +224,11 @@ export function VoiceSheet({ open, onClose, paneKey, host }: VoiceSheetProps) {
         {host.locked && <Notice tone="caution" variant="box" className="w-full">{t("voice.locked")}</Notice>}
 
         {confirm !== null && (
-          <div className="border-border flex w-full flex-col gap-2 rounded-sm border p-3" role="alertdialog">
+          <div
+            className="border-border flex w-full flex-col gap-2 rounded-sm border p-3"
+            role="alertdialog"
+            aria-label={confirm.kind === "send" ? t("voice.confirm.send.title") : t("voice.confirm.key.title", { key: confirm.key })}
+          >
             <div className="text-sm font-medium">
               {confirm.kind === "send" ? t("voice.confirm.send.title") : t("voice.confirm.key.title", { key: confirm.key })}
             </div>
