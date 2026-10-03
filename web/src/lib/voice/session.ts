@@ -131,6 +131,8 @@ export class VoiceSession {
   private nextLine = 1;
   private dictation = "";
   private stopped = false;
+  /** Which microphone start is current; an older one that fails after a mute or a restart is stale. */
+  private micGeneration = 0;
 
   private readonly deps: VoiceSessionDeps;
 
@@ -188,6 +190,8 @@ export class VoiceSession {
     if (this.snap.phase !== "live" || muted === this.snap.muted) return;
     this.snap = { ...this.snap, muted, level: 0 };
     if (muted) {
+      // Any start still pending is cancelled by this stop; its rejection is the mute, not a refusal.
+      this.micGeneration += 1;
       this.transport?.send({ t: "end" });
       this.deps.audio.stopCapture();
       this.publish();
@@ -247,6 +251,7 @@ export class VoiceSession {
   }
 
   private async openMicrophone(): Promise<void> {
+    const generation = ++this.micGeneration;
     try {
       await this.deps.audio.startCapture((data, level) => {
         if (this.stopped || this.snap.muted) return;
@@ -257,8 +262,9 @@ export class VoiceSession {
         }
       });
     } catch {
-      // A capture that failed because the session ended meanwhile is not a refusal.
-      if (!this.stopped) this.fail("voice.mic_denied");
+      // A capture that failed because the session ended, or because a mute or a newer start
+      // superseded it, is not a refusal.
+      if (!this.stopped && generation === this.micGeneration) this.fail("voice.mic_denied");
     }
   }
 

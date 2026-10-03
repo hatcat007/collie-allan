@@ -92,9 +92,13 @@ export async function cmdVoiceSetup(deps: VoiceDeps, args: readonly string[]): P
 
   // A typo such as `--modle` must not let setup succeed with the default model the operator meant to
   // override, and in an unattended run nobody is there to notice. Refused before anything is written.
-  const unknown = [...Object.keys(flags).filter((name) => !SETUP_FLAGS.has(name)).map((n) => `--${n}`), ...positional];
-  if (unknown.length > 0) {
-    deps.io.err(`error: unknown argument${unknown.length === 1 ? "" : "s"}: ${unknown.join(" ")}. Nothing was written.`);
+  // Flag NAMES are echoed, a bare word is only counted: the likeliest stray word is a key pasted in
+  // the wrong place, and an error that repeated it would print the one thing setup promises never to.
+  const badFlags = Object.keys(flags).filter((name) => !SETUP_FLAGS.has(name)).map((n) => `--${n}`);
+  if (badFlags.length > 0 || positional.length > 0) {
+    const parts = [...badFlags];
+    if (positional.length > 0) parts.push(`${positional.length} stray word${positional.length === 1 ? "" : "s"}`);
+    deps.io.err(`error: unknown argument: ${parts.join(", ")}. Nothing was written.`);
     for (const line of SETUP_USAGE) deps.io.err(line);
     return EXIT.USAGE;
   }

@@ -68,16 +68,22 @@ export function VoiceSheet({ open, onClose, paneKey, host }: VoiceSheetProps) {
   // own earlier version as the transcript firms up, and never the operator's text before them.
   const base = useRef("");
 
-  const ask = (what: Confirm): Promise<ToolOutcome> =>
-    new Promise((resolve) => {
+  const ask = (what: Confirm): Promise<ToolOutcome> => {
+    // A confirmed action is already being carried out: it owns the resolver until it finishes. A
+    // new request must not take that over, or the first action's result would be reported as the
+    // second's, and the model told "sent" for something the operator never confirmed.
+    if (taken.current) {
+      return Promise.resolve({ status: "blocked", detail: "another action is being carried out" });
+    }
+    return new Promise((resolve) => {
       // The model may ask again before the operator answers. The earlier request is declined, never
       // dropped: a resolver nobody calls is a tool call the model waits on forever.
       answer.current?.({ status: "declined" });
       answer.current = resolve;
-      taken.current = false;
       setConfirming(false);
       setConfirm(what);
     });
+  };
   const settle = (outcome: ToolOutcome) => {
     answer.current?.(outcome);
     answer.current = null;

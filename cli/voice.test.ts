@@ -61,6 +61,13 @@ describe("voice setup", () => {
     }
   });
 
+  test("a stray word, which may be a key pasted in the wrong place, is never echoed back", async () => {
+    const d = deps();
+    expect(await cmdVoiceSetup(d, ["AIza-pasted-secret-9999"])).toBe(EXIT.USAGE);
+    expect(said(d)).toContain("1 stray word");
+    expect(said(d)).not.toContain("AIza-pasted-secret");
+  });
+
   test("writes an owner-only file, never echoing the key, and leaves defaults out", async () => {
     const d = deps();
     expect(await cmdVoiceSetup(d, ["--key", "AIza-secret-1234"])).toBe(EXIT.OK);

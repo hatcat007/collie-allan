@@ -18,6 +18,8 @@ function rig(
   const played: string[] = [];
   const log = { flushed: 0, captureStopped: 0, captureStarted: 0, closed: 0, transportClosed: 0 };
   let denyOnce = false;
+  let hold = false;
+  let failHeld: (() => void) | null = null;
   const drafts: string[] = [];
   const dictations: string[] = [];
   const keys: string[] = [];
@@ -30,6 +32,11 @@ function rig(
       if (over.micDenied || denyOnce) {
         denyOnce = false;
         throw new Error("denied");
+      }
+      if (hold) {
+        hold = false;
+        await new Promise<void>((_, reject) => void (failHeld = () => reject(new Error("capture stopped"))));
+        return;
       }
       log.captureStarted += 1;
       chunk = cb;
@@ -66,6 +73,8 @@ function rig(
     drain: () => idle?.(),
     drop: () => handlers?.closed(),
     denyNext: () => void (denyOnce = true),
+    holdMic: () => void (hold = true),
+    failHeldMic: () => failHeld?.(),
     tick: () => new Promise((r) => setTimeout(r, 0)),
   };
 }
@@ -172,6 +181,32 @@ describe("VoiceSession persona and audio", () => {
     await r.tick();
     expect(r.log.captureStarted).toBe(opensBefore + 1);
     expect(r.session.snapshot().muted).toBe(false);
+  });
+
+  test("muting while the microphone is still starting is a mute, not a refusal", async () => {
+    const r = rig();
+    r.holdMic();
+    await r.session.start("agent");
+    r.server({ t: "ready" });
+    await r.tick();
+    r.session.setMuted(true);
+    r.failHeldMic();
+    await r.tick();
+    expect(r.session.snapshot()).toMatchObject({ phase: "live", muted: true, error: null });
+  });
+
+  test("a stale start that fails after a newer one began does not end the session", async () => {
+    const r = rig();
+    r.holdMic();
+    await r.session.start("agent");
+    r.server({ t: "ready" });
+    await r.tick();
+    r.session.setMuted(true);
+    r.session.setMuted(false);
+    await r.tick();
+    r.failHeldMic();
+    await r.tick();
+    expect(r.session.snapshot().phase).toBe("live");
   });
 
   test("a microphone that fails to reopen after unmute ends the session as refused", async () => {

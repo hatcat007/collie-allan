@@ -184,6 +184,28 @@ describe("VoiceSheet", () => {
     expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
   });
 
+  it("a request that arrives while a confirmed action is in flight is refused, never settled in its place", async () => {
+    let finish: (ok: boolean) => void = () => {};
+    const h = host({ send: vi.fn(() => new Promise<boolean>((resolve) => void (finish = resolve))) });
+    await startLive(h);
+    await server({ t: "tool_call", id: "20", name: "send_reply", args: { text: "first" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Send" }));
+    await server({ t: "tool_call", id: "21", name: "send_reply", args: { text: "second" } });
+    await waitFor(() =>
+      expect(wire.sent.find((m) => m.t === "tool_result" && m.id === "21")).toMatchObject({
+        response: { result: "blocked" },
+      }),
+    );
+    finish(true);
+    await waitFor(() =>
+      expect(wire.sent.find((m) => m.t === "tool_result" && m.id === "20")).toMatchObject({
+        response: { result: "sent" },
+      }),
+    );
+    expect(h.send).toHaveBeenCalledTimes(1);
+    expect(h.send).toHaveBeenCalledWith("first");
+  });
+
   it("a double tap on a key confirmation presses once", async () => {
     let finish: (ok: boolean) => void = () => {};
     const h = host({ pressKey: vi.fn(() => new Promise<boolean>((resolve) => void (finish = resolve))) });
