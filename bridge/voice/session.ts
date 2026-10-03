@@ -52,6 +52,9 @@ export const MAX_TOOL_RESULT_CHARS = 64 * 1024;
 export const MAX_RESUME_ATTEMPTS = 2;
 /** A replacement that has not come up by now is a failed one, not a slow one. */
 export const DEFAULT_RESUME_TIMEOUT_MS = 10_000;
+
+/** Audio frames kept for a replacement still in setup: about this many 128 ms blocks, no more. */
+const MAX_HELD_FRAMES = 64;
 /** A session is cut here whatever else happens: an open microphone is not a standing service. */
 export const MAX_SESSION_MS = 60 * 60 * 1000;
 
@@ -99,6 +102,8 @@ export class VoiceRelay {
   private pendingTimer: ReturnType<typeof setTimeout> | undefined;
   /** The retiring socket closed while its replacement was still coming up. */
   private retiredGone = false;
+  /** Frames the phone sent while the only live socket was still being replaced. */
+  private held: { text: string; audio: boolean }[] = [];
   private ended = false;
   private ready = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -133,14 +138,33 @@ export class VoiceRelay {
     if (t === "audio") {
       const data = jsonStringField(o.data);
       if (data === null || data.length > MAX_AUDIO_CHUNK_CHARS) return this.fail("voice.bad_message");
-      this.upstream?.send(JSON.stringify(buildAudioFrame(data)));
+      this.sendUpstream(JSON.stringify(buildAudioFrame(data)), true);
     } else if (t === "end") {
-      this.upstream?.send(JSON.stringify(buildAudioStreamEnd()));
+      this.sendUpstream(JSON.stringify(buildAudioStreamEnd()), false);
     } else if (t === "tool_result") {
       this.onToolResult(o);
     } else {
       this.fail("voice.bad_message");
     }
+  }
+
+  /**
+   * Send to the live upstream, or hold the frame while the retiring socket is gone and its replacement
+   * is still in setup, so the gap loses nothing the replacement can still take. Tool results and the
+   * stream end are never dropped; audio is, oldest first, past `MAX_HELD_FRAMES`.
+   */
+  private sendUpstream(text: string, audio: boolean): void {
+    if (this.retiredGone && this.pending !== null) {
+      this.held.push({ text, audio });
+      let audioHeld = this.held.filter((f) => f.audio).length;
+      while (audioHeld > MAX_HELD_FRAMES) {
+        const oldest = this.held.findIndex((f) => f.audio);
+        this.held.splice(oldest, 1);
+        audioHeld -= 1;
+      }
+      return;
+    }
+    this.upstream?.send(text);
   }
 
   /** The phone's socket closed. */
@@ -157,7 +181,7 @@ export class VoiceRelay {
     if (name === undefined) return;
     if (JSON.stringify(response).length > MAX_TOOL_RESULT_CHARS) return this.fail("voice.bad_message");
     this.awaiting.delete(id);
-    this.upstream?.send(JSON.stringify(buildToolResponse(id, name, response)));
+    this.sendUpstream(JSON.stringify(buildToolResponse(id, name, response)), false);
   }
 
   private connect(resuming: boolean): void {
@@ -227,6 +251,9 @@ export class VoiceRelay {
         this.resumeAttempts = 0;
         this.goAwayAt = null;
         this.retiredGone = false;
+        const held = this.held;
+        this.held = [];
+        for (const frame of held) this.upstream?.send(frame.text);
         if (old !== null) {
           old.detach();
           old.close(1000, "resumed");
@@ -269,8 +296,9 @@ export class VoiceRelay {
         // A name the bridge never declared is the model hallucinating; it is refused upstream with
         // an error result and the phone never hears of it.
         if (!isVoiceToolName(event.call.name)) {
-          this.upstream?.send(
+          this.sendUpstream(
             JSON.stringify(buildToolResponse(event.call.id, event.call.name, { error: "unknown tool" })),
+            false,
           );
           return;
         }
@@ -343,6 +371,7 @@ export class VoiceRelay {
     this.upstream = null;
     this.pending = null;
     this.awaiting.clear();
+    this.held = [];
     if (notify) {
       try {
         this.opts.send({ t: "closed" });

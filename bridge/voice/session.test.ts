@@ -195,6 +195,23 @@ describe("VoiceRelay", () => {
     expect(r.sockets[1]?.frames().at(-1)).toHaveProperty("realtimeInput.audio.data", "AAA=");
   });
 
+  test("frames the phone sends while only the replacement can take them are held, then delivered in order", () => {
+    const r = ready();
+    r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });
+    r.sockets[0]?.push({ goAway: { timeLeft: { seconds: 20 } } });
+    r.sockets[0]?.push({ toolCall: { functionCalls: [{ id: "t1", name: "read_pane", args: {} }] } });
+    r.sockets[0]?.drop();
+    const before = r.sockets[0]?.sent.length;
+    r.relay.onClientMessage({ t: "audio", data: "AAA=" });
+    r.relay.onClientMessage({ t: "tool_result", id: "t1", response: { screen: "x" } });
+    expect(r.sockets[0]?.sent.length).toBe(before);
+    r.sockets[1]?.open();
+    r.sockets[1]?.push({ setupComplete: {} });
+    const frames = r.sockets[1]?.frames().slice(1) ?? [];
+    expect(frames[0]).toHaveProperty("realtimeInput.audio.data", "AAA=");
+    expect(frames[1]).toHaveProperty("toolResponse.functionResponses");
+  });
+
   test("a replacement that fails after the GoAway deadline is not retried", async () => {
     const r = ready();
     r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });
