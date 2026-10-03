@@ -248,6 +248,9 @@ export function cmdVoiceStatus(deps: VoiceDeps): number {
   row("language", settings.language ?? "auto-detect", source("language"));
   row("voice", settings.voiceName ?? "model default", source("voiceName"));
   deps.io.out(`  config    ${path}${deps.files.exists(path) ? "" : " (absent)"}`);
+  // Voice is on through the environment, but the file beside it is broken: say so, because the
+  // running bridge may still be reading the last good copy of it.
+  for (const line of warnings) deps.io.err(`  warning: ${line}`);
   return EXIT.OK;
 }
 
