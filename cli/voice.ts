@@ -11,6 +11,7 @@ import {
   voiceEnvSettings,
   type VoiceSettings,
 } from "../bridge/voice/config.ts";
+import { jsonRecord } from "../bridge/stt/json.ts";
 import { type UpstreamFactory, VoiceRelay } from "../bridge/voice/session.ts";
 import { openGeminiSocket } from "../bridge/voice/upstream.ts";
 import { parseCrewArgs } from "./crew.ts";
@@ -50,7 +51,14 @@ function readFileSettings(deps: VoiceDeps, warn?: (message: string) => void): Ra
   if (raw === null) return coerceVoiceFile(undefined);
   try {
     // SAFETY: `JSON.parse` answers with a JSON value, and `coerceVoiceFile` is its only reader.
-    return coerceVoiceFile(JSON.parse(raw) as JsonValue, warn);
+    const parsed = JSON.parse(raw) as JsonValue;
+    // Valid JSON that is not an object (`null`, a list, a bare string) is not a settings file: say so,
+    // or it reads as an absent file while the file is there.
+    if (jsonRecord(parsed) === null) {
+      warn?.(`${VOICE_FILENAME} is not a settings object`);
+      return coerceVoiceFile(undefined);
+    }
+    return coerceVoiceFile(parsed, warn);
   } catch {
     // The running bridge keeps its last good file on a parse failure, so "nothing configured" would
     // be untrue here: say the file is broken instead.

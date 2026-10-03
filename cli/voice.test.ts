@@ -158,6 +158,16 @@ describe("voice status and off", () => {
     expect(said(d)).not.toContain("nothing configured");
   });
 
+  test("status reports a voice.json that is valid JSON but not an object", () => {
+    for (const body of ["null", "[]", '"key"', "42"]) {
+      const d = deps({ seed: { [CONFIG_PATH]: body } });
+      expect(cmdVoiceStatus(d)).toBe(EXIT.FAIL);
+      expect(said(d)).toContain("not a settings object");
+      expect(said(d)).not.toContain("nothing configured");
+      expect(said(d)).not.toContain("(absent)");
+    }
+  });
+
   test("status shows a broken voice.json even when the environment keeps voice on", () => {
     const d = deps({ seed: { [CONFIG_PATH]: "{not json" }, env: { [VOICE_ENV_KEYS.key]: "AIza-env" } });
     expect(cmdVoiceStatus(d)).toBe(EXIT.OK);
