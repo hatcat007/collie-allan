@@ -1244,6 +1244,11 @@ export interface BridgeConfig {
    */
   stt?: SttCapability;
   /**
+   * Voice mode, when a Gemini Live key is configured. **Absent is the feature being off**, the same
+   * reading `stt` has: no key means no voice button. A label and a model id, never the key.
+   */
+  voice?: VoiceCapability;
+  /**
    * What this collie accepts as an attachment. **Absent is a bridge older than this field**, which
    * a client reads as the contract that shipped before it: 10 MB, images only. Present, it is the
    * whole answer — the phone builds its file picker's `accept` list from it and refuses an oversize
@@ -1282,6 +1287,14 @@ export interface SttCapability {
   available: boolean;
   /** Operator-facing prose when it could not. Absent when it could. */
   reason?: string;
+}
+
+/** What `/api/config` says about voice mode. The whole of what leaves the bridge on this subject. */
+export interface VoiceCapability {
+  /** The provider's id, e.g. `gemini-live`. */
+  provider: string;
+  /** The Live model the bridge will open, e.g. `gemini-3.8-live`. */
+  model: string;
 }
 
 /**

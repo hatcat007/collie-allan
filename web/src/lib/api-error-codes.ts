@@ -87,6 +87,10 @@ export const API_ERROR_CODES = [
   "stt.empty",
   "stt.provider_failed",
 
+  // Voice mode — POST /api/voice/ticket
+  "voice.unconfigured",
+  "voice.busy",
+
   // The prompt-cache watch list — /api/notifications/cache-watch (ADR 0042)
   "cache.pane_unknown",
   "cache.no_session",

@@ -89,6 +89,15 @@ import {
 import { realExec, realFiles } from "./sys.ts";
 import { cmdSupervise, realSuperviseDeps } from "./task-scheduler.ts";
 import { cmdApplyUpdate, cmdUpdate } from "./update.ts";
+import {
+  cmdVoice,
+  cmdVoiceOff,
+  cmdVoiceSetup,
+  cmdVoiceStatus,
+  cmdVoiceTest,
+  VOICE_SUBCOMMANDS,
+  type VoiceDeps,
+} from "./voice.ts";
 import { cmdUpdateCheck, updateCheckDeps, wantsCheck } from "./update-check.ts";
 
 // The `collie` binary's dispatch: argv in, exit code out. This module owns ONLY the dispatch —
@@ -238,6 +247,17 @@ function sttDeps(io: Io): SttDeps {
     io,
     files: realFiles,
     exec: realExec(ctx.env, ctx.home),
+    interactive: process.stdin.isTTY === true,
+    prompt: (question) => (process.stdin.isTTY === true ? prompt(question) : null),
+  };
+}
+
+function voiceDeps(io: Io): VoiceDeps {
+  const ctx = loadContext(io.err);
+  return {
+    ctx,
+    io,
+    files: realFiles,
     interactive: process.stdin.isTTY === true,
     prompt: (question) => (process.stdin.isTTY === true ? prompt(question) : null),
   };
@@ -648,6 +668,35 @@ export const COMMANDS: readonly Command[] = [
     ],
     // Bare or misspelt lands here, and `cmdStt` owns that message — as `cmdDevices` does.
     run: (args, s) => cmdStt(sttDeps(s.io), args),
+  },
+  // ── Voice mode ─────────────────────────────────────────────────────────────
+  // Beside `stt`, for the same reason: `voice setup` writes a provider key into the state dir.
+  {
+    name: "voice",
+    summary: `voice mode with Gemini Live (off until you run it): ${VOICE_SUBCOMMANDS.join(", ")}`,
+    subcommands: [
+      {
+        name: "setup",
+        summary: "take a Gemini key and write it into the state dir (interactive, or all by flag)",
+        run: (args, s) => cmdVoiceSetup(voiceDeps(s.io), args),
+      },
+      {
+        name: "test",
+        summary: "open one real session through what is configured",
+        run: (_args, s) => cmdVoiceTest(voiceDeps(s.io)),
+      },
+      {
+        name: "status",
+        summary: "the model, where each setting came from, and whether it is on",
+        run: (_args, s) => cmdVoiceStatus(voiceDeps(s.io)),
+      },
+      {
+        name: "off",
+        summary: "remove voice.json — voice mode is absent again",
+        run: (_args, s) => cmdVoiceOff(voiceDeps(s.io)),
+      },
+    ],
+    run: (args, s) => cmdVoice(voiceDeps(s.io), args),
   },
   // ── The config file (ADR 0040) ─────────────────────────────────────────────
   // Declared beside `stt` because it is the same shape of verb: a tree the operator's own terminal

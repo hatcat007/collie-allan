@@ -65,6 +65,11 @@ PATH. Details and rollback: [`docs/upgrading.md`](./docs/upgrading.md) → *Upgr
   Type mode, and the card updates after about a second. A row omp cut short and a model the
   conversation no longer fits (picking it compacts first) are left out. The `@` quick roles, the
   task-model picker, narrow panes and the Nerd Font symbols stay terminal text with an Escape button.
+- **`collie voice setup` turns on a Gemini Live voice relay in the bridge.** The bridge opens one
+  Gemini Live session per phone, holds the key in `voice.json` at mode 0600 and never sends it to the
+  phone, and relays audio and the model's tool calls over a one-use-ticket WebSocket at `/api/voice`.
+  `collie voice test`, `status` and `off` complete the verb. It is off until you run setup, and the
+  default model is `gemini-3.8-live`.
 
 ### Changed
 

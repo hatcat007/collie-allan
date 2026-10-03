@@ -934,6 +934,8 @@ export const ja: Dictionary = {
   "apiError.stt.unreadable": "録音データを読み取れませんでした。",
   "apiError.stt.empty": "録音データが空です。",
   "apiError.stt.provider_failed": "文字起こしに失敗しました: {reason}",
+  "apiError.voice.unconfigured": "このコリーでは音声モードが設定されていません。",
+  "apiError.voice.busy": "音声セッションが既に開いています。時間をおいて再試行してください。",
   "apiError.pairing.bad_request": "コードまたは名前が無効です。名前は 1〜48 文字で指定してください。",
   "apiError.pairing.no_pending": "ホストで待機中のペアリングコードがありません。",
   "apiError.pairing.expired": "ペアリングコードの有効期限が切れています。",

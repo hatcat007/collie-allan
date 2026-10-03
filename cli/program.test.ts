@@ -87,6 +87,8 @@ const PUSH_VERBS = ["push"];
 // operator's own terminal is the only right place to configure, because they mint or accept a
 // credential.
 const STT_VERBS = ["stt"];
+/** Voice mode (Gemini Live). Declared right after `stt`: it too writes a provider key into the state dir. */
+const VOICE_VERBS = ["voice"];
 /** The config-file tree (ADR 0040). Declared right after `stt`, for the same reasons. */
 const CONFIG_VERBS = ["config"];
 // The manual, printed out of the binary: `collie skill` for an AI agent, `collie docs` for the
@@ -109,6 +111,7 @@ describe("the verb table", () => {
       ...PAIRING_VERBS,
       ...PUSH_VERBS,
       ...STT_VERBS,
+      ...VOICE_VERBS,
       ...CONFIG_VERBS,
       ...CREW_VERBS,
       ...MANUAL_VERBS,
@@ -280,6 +283,7 @@ describe("the subcommand trees", () => {
       "devices",
       "push",
       "stt",
+      "voice",
       "config",
       "crew",
       // The alias carries the SAME array — that is what `cli/crew.test.ts` pins.
@@ -393,6 +397,9 @@ describe("exit codes", () => {
       // sub-verb resolves that same real dir before it decides anything. cli/stt.test.ts drives all
       // four against fakes.
       ...STT_VERBS,
+      // `voice setup` writes a provider key into the developer's own state dir, and every other
+      // sub-verb resolves that same real dir first. cli/voice.test.ts drives all four against fakes.
+      ...VOICE_VERBS,
       // `hooks` edits the developer's own ~/.claude/settings.json, and `hooks status` resolves the
       // same real paths before it reads them. cli/hooks.test.ts drives all three against fakes.
       // `beacon` is world-touching in the other direction: it would write a beacon into this host's

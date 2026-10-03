@@ -62,6 +62,7 @@ import { NotifyPrefsStore } from "./notify-prefs.ts";
 import { FolderStore } from "./folders.ts";
 import { filePairingIo, PairingStore } from "./pairing.ts";
 import { createSttGate } from "./stt/index.ts";
+import { createVoiceSettingsReader } from "./voice/config.ts";
 import { runBootGate } from "./crew/boot-gate.ts";
 import { PEER_BROWSER_ENV, resolveCrewRuntime, warnsOnWildcardBind } from "./crew/config.ts";
 import {
@@ -608,6 +609,14 @@ const pairing = new PairingStore(filePairingIo(cfg.stateDir));
 const stt = createSttGate({
   stateDir: cfg.stateDir,
   warn: (message) => console.warn(`[stt] ${message}`),
+});
+
+// Voice mode (bridge/voice/). Same posture as `stt`: holds no settings, re-reads
+// `<stateDir>/voice.json` + the environment per request behind an mtime check, so `collie voice
+// setup` lands on the RUNNING service. No key resolving is the feature being off.
+const voice = createVoiceSettingsReader({
+  stateDir: cfg.stateDir,
+  warn: (message) => console.warn(`[voice] ${message}`),
 });
 
 // When each pane last moved, and when you last looked at it — the two numbers the dashboard sorts
@@ -1821,6 +1830,7 @@ const server = startServer({
   crew,
   pairing,
   stt,
+  voice,
   crewLead,
   crewStatus,
   peerNotifier,

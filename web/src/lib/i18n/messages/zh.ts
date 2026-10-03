@@ -912,6 +912,8 @@ export const zh: Dictionary = {
   "apiError.stt.unreadable": "无法读取录音数据。",
   "apiError.stt.empty": "录音数据为空。",
   "apiError.stt.provider_failed": "语音转写失败：{reason}",
+  "apiError.voice.unconfigured": "此 collie 尚未设置语音模式。",
+  "apiError.voice.busy": "已有语音会话在进行中，请稍后重试。",
   "apiError.pairing.bad_request": "配对码或名称无效。名称长度须在 1 到 48 个字符之间。",
   "apiError.pairing.no_pending": "主机上没有待处理的配对码。",
   "apiError.pairing.expired": "配对码已过期。",

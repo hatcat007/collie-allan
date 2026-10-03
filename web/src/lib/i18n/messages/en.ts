@@ -1012,6 +1012,8 @@ export const en = {
   "apiError.stt.unreadable": "That recording couldn't be read.",
   "apiError.stt.empty": "That recording is empty.",
   "apiError.stt.provider_failed": "The transcription failed: {reason}",
+  "apiError.voice.unconfigured": "Voice mode isn't set up on this collie.",
+  "apiError.voice.busy": "A voice session is already open — try again in a moment.",
   "apiError.pairing.bad_request": "The code or the name wasn't usable. A name is 1–48 characters.",
   "apiError.pairing.no_pending": "No pairing code is waiting on the host.",
   "apiError.pairing.expired": "That pairing code has expired.",

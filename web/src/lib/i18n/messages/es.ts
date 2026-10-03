@@ -941,6 +941,8 @@ export const es: Dictionary = {
   "apiError.stt.unreadable": "No se pudo procesar el archivo de audio.",
   "apiError.stt.empty": "La grabación no contiene datos.",
   "apiError.stt.provider_failed": "Fallo en el servicio de transcripción: {reason}",
+  "apiError.voice.unconfigured": "El modo de voz no está configurado en este collie.",
+  "apiError.voice.busy": "Ya hay una sesión de voz abierta. Reintente en un momento.",
   "apiError.pairing.bad_request":
     "Código o nombre no válido. El nombre debe tener entre 1 y 48 caracteres.",
   "apiError.pairing.no_pending": "No hay solicitudes de vinculación pendientes en el host.",

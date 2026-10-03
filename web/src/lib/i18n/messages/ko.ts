@@ -926,6 +926,8 @@ export const ko: Dictionary = {
   "apiError.stt.unreadable": "녹음 데이터를 읽을 수 없습니다.",
   "apiError.stt.empty": "녹음 데이터가 비어 있습니다.",
   "apiError.stt.provider_failed": "음성 변환에 실패했습니다: {reason}",
+  "apiError.voice.unconfigured": "이 collie에는 음성 모드가 설정되어 있지 않습니다.",
+  "apiError.voice.busy": "이미 음성 세션이 열려 있습니다. 잠시 후 다시 시도하십시오.",
   "apiError.pairing.bad_request": "코드 또는 이름을 사용할 수 없습니다. 이름은 1~48자여야 합니다.",
   "apiError.pairing.no_pending": "호스트에 대기 중인 페어링 코드가 없습니다.",
   "apiError.pairing.expired": "만료된 페어링 코드입니다.",

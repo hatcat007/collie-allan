@@ -946,6 +946,8 @@ export const de: Dictionary = {
   "apiError.stt.unreadable": "Aufnahme konnte nicht gelesen werden.",
   "apiError.stt.empty": "Aufnahme enthält keine Audiodaten.",
   "apiError.stt.provider_failed": "Transkription fehlgeschlagen: {reason}",
+  "apiError.voice.unconfigured": "Der Sprachmodus ist auf diesem Collie nicht eingerichtet.",
+  "apiError.voice.busy": "Eine Sprachsitzung ist bereits offen. Bitte gleich erneut versuchen.",
   "apiError.pairing.bad_request":
     "Code oder Name ungültig. Namen müssen 1 bis 48 Zeichen lang sein.",
   "apiError.pairing.no_pending": "Kein ausstehender Kopplungscode auf dem Host vorhanden.",

@@ -1,0 +1,167 @@
+import { describe, expect, test } from "bun:test";
+
+import type { VoiceSettings } from "./config.ts";
+import type { JsonValue } from "../json.ts";
+import { type UpstreamHandlers, type UpstreamSocket, VoiceRelay, type VoiceClientMessage } from "./session.ts";
+
+const settings: VoiceSettings = { provider: "gemini-live", apiKey: "k", model: "gemini-3.8-live" };
+
+class FakeSocket implements UpstreamSocket {
+  sent: string[] = [];
+  closed = false;
+  handlers: UpstreamHandlers | null = null;
+  send(data: string) {
+    this.sent.push(data);
+  }
+  close() {
+    this.closed = true;
+  }
+  attach(h: UpstreamHandlers) {
+    this.handlers = h;
+  }
+  detach() {
+    this.handlers = null;
+  }
+  open() {
+    this.handlers?.open();
+  }
+  push(frame: JsonValue) {
+    this.handlers?.message(JSON.stringify(frame));
+  }
+  drop() {
+    this.handlers?.close();
+  }
+  frames(): JsonValue[] {
+    return this.sent.map((s) => JSON.parse(s));
+  }
+}
+
+function rig() {
+  const sockets: FakeSocket[] = [];
+  const out: VoiceClientMessage[] = [];
+  let ended = 0;
+  const relay = new VoiceRelay({
+    settings,
+    open: () => {
+      const s = new FakeSocket();
+      sockets.push(s);
+      return s;
+    },
+    send: (m) => void out.push(m),
+    onEnd: () => void (ended += 1),
+  });
+  return { relay, sockets, out, ended: () => ended };
+}
+
+function ready() {
+  const r = rig();
+  r.relay.start();
+  r.sockets[0]?.open();
+  r.sockets[0]?.push({ setupComplete: {} });
+  return r;
+}
+
+describe("VoiceRelay", () => {
+  test("start sends setup on open and announces ready after setupComplete", () => {
+    const r = rig();
+    r.relay.start();
+    r.relay.start();
+    expect(r.sockets).toHaveLength(1);
+    r.sockets[0]?.open();
+    expect(r.sockets[0]?.frames()[0]).toHaveProperty("setup.model", "models/gemini-3.8-live");
+    expect(r.out).toEqual([]);
+    r.sockets[0]?.push({ setupComplete: {} });
+    expect(r.out).toEqual([{ t: "ready" }]);
+  });
+
+  test("a start message names the mode, and an unknown mode is refused", () => {
+    const r = rig();
+    r.relay.onClientMessage({ t: "start", mode: "dictate" });
+    r.sockets[0]?.open();
+    expect(JSON.stringify(r.sockets[0]?.frames()[0])).toContain("Never speak");
+    const bad = rig();
+    bad.relay.onClientMessage({ t: "start", mode: "shout" });
+    expect(bad.out[0]).toEqual({ t: "error", code: "voice.bad_message" });
+    expect(bad.sockets).toHaveLength(0);
+  });
+
+  test("audio flows both ways; end flushes the stream", () => {
+    const r = ready();
+    r.relay.onClientMessage({ t: "audio", data: "AAA=" });
+    r.relay.onClientMessage({ t: "end" });
+    const frames = r.sockets[0]?.frames() ?? [];
+    expect(frames[1]).toEqual({ realtimeInput: { audio: { data: "AAA=", mimeType: "audio/pcm;rate=16000" } } });
+    expect(frames[2]).toEqual({ realtimeInput: { audioStreamEnd: true } });
+    r.sockets[0]?.push({ serverContent: { modelTurn: { parts: [{ inlineData: { data: "QQ==" } }] } } });
+    expect(r.out.at(-1)).toEqual({ t: "audio", data: "QQ==" });
+  });
+
+  test("audio before ready is dropped, not queued", () => {
+    const r = rig();
+    r.relay.start();
+    r.sockets[0]?.open();
+    r.relay.onClientMessage({ t: "audio", data: "AAA=" });
+    expect(r.sockets[0]?.sent).toHaveLength(1);
+  });
+
+  test("a tool call round-trips through the phone", () => {
+    const r = ready();
+    r.sockets[0]?.push({ toolCall: { functionCalls: [{ id: "1", name: "draft_reply", args: { text: "hej" } }] } });
+    expect(r.out.at(-1)).toEqual({ t: "tool_call", id: "1", name: "draft_reply", args: { text: "hej" } });
+    r.relay.onClientMessage({ t: "tool_result", id: "1", response: { result: "ok" } });
+    expect(r.sockets[0]?.frames().at(-1)).toEqual({
+      toolResponse: { functionResponses: [{ id: "1", name: "draft_reply", response: { result: "ok" } }] },
+    });
+  });
+
+  test("a result for an unknown id is dropped and an undeclared tool never reaches the phone", () => {
+    const r = ready();
+    const before = r.sockets[0]?.sent.length;
+    r.relay.onClientMessage({ t: "tool_result", id: "zzz", response: { result: "ok" } });
+    expect(r.sockets[0]?.sent.length).toBe(before);
+    r.sockets[0]?.push({ toolCall: { functionCalls: [{ id: "2", name: "rm_rf", args: {} }] } });
+    expect(r.out.some((m) => m.t === "tool_call")).toBe(false);
+    expect(r.sockets[0]?.frames().at(-1)).toMatchObject({
+      toolResponse: { functionResponses: [{ id: "2", response: { error: "unknown tool" } }] },
+    });
+  });
+
+  test("an oversized audio chunk or a malformed message ends the session with a code", () => {
+    const r = ready();
+    r.relay.onClientMessage({ t: "audio", data: "x".repeat(200_000) });
+    expect(r.out.at(-2)).toEqual({ t: "error", code: "voice.bad_message" });
+    expect(r.out.at(-1)).toEqual({ t: "closed" });
+    expect(r.sockets[0]?.closed).toBe(true);
+    expect(r.ended()).toBe(1);
+  });
+
+  test("upstream closing unexpectedly is reported once", () => {
+    const r = ready();
+    r.sockets[0]?.drop();
+    expect(r.out.at(-2)).toEqual({ t: "error", code: "voice.upstream_closed" });
+    r.sockets[0]?.drop();
+    expect(r.ended()).toBe(1);
+  });
+
+  test("the phone leaving closes upstream without an error", () => {
+    const r = ready();
+    r.relay.onClientClosed();
+    expect(r.sockets[0]?.closed).toBe(true);
+    expect(r.out).toEqual([{ t: "ready" }]);
+    expect(r.ended()).toBe(1);
+  });
+
+  test("goAway reconnects with the handle and swaps on setupComplete", () => {
+    const r = ready();
+    r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });
+    r.sockets[0]?.push({ goAway: { timeLeft: { seconds: 20 } } });
+    expect(r.sockets).toHaveLength(2);
+    r.sockets[1]?.open();
+    expect(r.sockets[1]?.frames()[0]).toHaveProperty("setup.sessionResumption.handle", "h9");
+    r.sockets[1]?.push({ setupComplete: {} });
+    expect(r.sockets[0]?.closed).toBe(true);
+    r.relay.onClientMessage({ t: "audio", data: "AAA=" });
+    expect(r.sockets[1]?.frames().at(-1)).toHaveProperty("realtimeInput.audio.data", "AAA=");
+    expect(r.ended()).toBe(0);
+  });
+});

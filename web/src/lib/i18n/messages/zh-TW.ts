@@ -908,6 +908,8 @@ export const zhTW: Dictionary = {
   "apiError.stt.unreadable": "無法讀取錄音資料。",
   "apiError.stt.empty": "錄音資料為空。",
   "apiError.stt.provider_failed": "語音轉錄失敗：{reason}",
+  "apiError.voice.unconfigured": "此 collie 尚未設定語音模式。",
+  "apiError.voice.busy": "已有語音工作階段進行中，請稍後再試。",
   "apiError.pairing.bad_request": "配對代碼或名稱無效。名稱長度必須介於 1 到 48 個字元之間。",
   "apiError.pairing.no_pending": "主機上沒有待處理的配對代碼。",
   "apiError.pairing.expired": "配對代碼已過期。",
