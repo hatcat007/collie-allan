@@ -158,8 +158,8 @@ export class VoiceRelay {
   private sendUpstream(text: string, audio: boolean): void {
     if (this.retiredGone && this.pending !== null) {
       // Bounded without a cap of its own: audio is trimmed below, a tool result is held once per
-      // awaited call id (`onToolResult` deletes the id as it sends), and one stream end says it all.
-      if (!audio && text === STREAM_END && this.held.some((f) => f.text === STREAM_END)) return;
+      // awaited call id (`onToolResult` deletes the id as it sends), and consecutive stream ends say it once. A mute, speech, mute keeps both ends, because the second closes the speech between.
+      if (!audio && text === STREAM_END && this.held.at(-1)?.text === STREAM_END) return;
       this.held.push({ text, audio });
       let audioHeld = this.held.filter((f) => f.audio).length;
       while (audioHeld > MAX_HELD_FRAMES) {
@@ -167,6 +167,8 @@ export class VoiceRelay {
         this.held.splice(oldest, 1);
         audioHeld -= 1;
       }
+      // Trimming audio can leave two ends side by side: they say it once.
+      this.held = this.held.filter((f, i) => !(f.text === STREAM_END && this.held[i - 1]?.text === STREAM_END));
       return;
     }
     this.upstream?.send(text);

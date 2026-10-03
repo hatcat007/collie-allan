@@ -224,6 +224,20 @@ describe("VoiceRelay", () => {
     expect(ends).toHaveLength(1);
   });
 
+  test("a stream end after speech that followed an earlier end is kept", () => {
+    const r = ready();
+    r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });
+    r.sockets[0]?.push({ goAway: { timeLeft: { seconds: 20 } } });
+    r.sockets[0]?.drop();
+    r.relay.onClientMessage({ t: "end" });
+    r.relay.onClientMessage({ t: "audio", data: "AAA=" });
+    r.relay.onClientMessage({ t: "end" });
+    r.sockets[1]?.open();
+    r.sockets[1]?.push({ setupComplete: {} });
+    const sent = (r.sockets[1]?.frames().slice(1) ?? []).map((f) => (JSON.stringify(f).includes("audioStreamEnd") ? "end" : "audio"));
+    expect(sent).toEqual(["end", "audio", "end"]);
+  });
+
   test("a replacement that fails after the GoAway deadline is not retried", async () => {
     const r = ready();
     r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });
