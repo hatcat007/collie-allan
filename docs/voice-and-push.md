@@ -159,12 +159,12 @@ looks like this — is [ADR 0029](../.adr/0029-speech-to-text-is-a-provider-seam
 
 ## Voice mode (optional)
 
-Talk to an agent with Gemini Live. It reads the pane, drafts a reply and sends it when you confirm.
-
 ```sh
 collie voice setup
 collie voice test
 ```
+
+Talk to an agent with Gemini Live. It reads the pane, drafts a reply and sends it when you confirm.
 
 **It does not exist until you run `collie voice setup`.** No row is drawn and nothing leaves the
 host. Setup takes effect on the running bridge with no restart. Get a key at

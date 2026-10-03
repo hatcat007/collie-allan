@@ -104,11 +104,11 @@ export interface VoiceTools {
   /** Dictation: the whole dictated text so far, replacing the previous call's. */
   setDictation(text: string): void;
   /** Ask the operator, then send through the reply guard. */
-  sendReply(text: string): Promise<ToolOutcome>;
+  sendReply(text: string, callId: string): Promise<ToolOutcome>;
   /** Ask the operator, then press one key. */
-  pressKey(key: string): Promise<ToolOutcome>;
-  /** The model withdrew a call: drop any confirmation it is waiting on. */
-  cancelPending(): void;
+  pressKey(key: string, callId: string): Promise<ToolOutcome>;
+  /** The model withdrew these calls: drop the confirmation one of them is waiting on, and only that. */
+  cancelPending(callIds: readonly string[]): void;
 }
 
 export interface VoiceSessionDeps {
@@ -311,7 +311,7 @@ export class VoiceSession {
     this.publish();
     let response: JsonObject;
     try {
-      response = await this.dispatch(name, args);
+      response = await this.dispatch(id, name, args);
     } catch {
       response = { error: "failed" };
     }
@@ -333,12 +333,13 @@ export class VoiceSession {
     let any = false;
     for (const id of ids) any = this.activeTools.delete(id) || any;
     if (!any) return;
-    this.deps.tools.cancelPending();
+    this.deps.tools.cancelPending(ids);
     this.snap = { ...this.snap, tool: this.lastActiveTool() };
     this.publish();
   }
 
   private async dispatch(
+    id: string,
     name: "read_pane" | "draft_reply" | "send_reply" | "press_key",
     args: JsonObject,
   ): Promise<JsonObject> {
@@ -349,7 +350,7 @@ export class VoiceSession {
     if (name === "press_key") {
       const key = asJsonString(args.key);
       if (key === undefined) return { error: "key is required" };
-      return outcome(await tools.pressKey(key));
+      return outcome(await tools.pressKey(key, id));
     }
     const text = asJsonString(args.text);
     if (text === undefined || text.trim() === "") return { error: "text is required" };
@@ -357,7 +358,7 @@ export class VoiceSession {
       tools.draftReply(text);
       return { result: "drafted" };
     }
-    return outcome(await tools.sendReply(text));
+    return outcome(await tools.sendReply(text, id));
   }
 
   private onClosed(): void {

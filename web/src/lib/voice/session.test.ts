@@ -54,7 +54,7 @@ function rig(
     setDictation: (t) => void dictations.push(t),
     sendReply: over.send ?? (async (t) => (sends.push(t), { status: "sent" })),
     pressKey: async (k) => (keys.push(k), { status: "sent" }),
-    cancelPending: () => void (log.cancelled += 1),
+    cancelPending: (ids) => void (log.cancelled += ids.length),
   };
   const snaps: VoiceSnapshot[] = [];
   const session = new VoiceSession({

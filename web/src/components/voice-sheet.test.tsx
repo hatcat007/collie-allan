@@ -241,6 +241,16 @@ describe("VoiceSheet", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   });
 
+  it("cancelling a different call leaves the open confirmation alone", async () => {
+    const h = host();
+    await startLive(h);
+    await server({ t: "tool_call", id: "40", name: "send_reply", args: { text: "x" } });
+    await server({ t: "tool_call", id: "41", name: "read_pane", args: {} });
+    await screen.findByRole("alertdialog");
+    await server({ t: "tool_cancelled", ids: ["41"] });
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+  });
+
   it("moving to another pane ends the session", async () => {
     const h = host();
     const { rerender } = render(<VoiceSheet open onClose={vi.fn()} paneKey="p1" host={h} />);

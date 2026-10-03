@@ -264,6 +264,19 @@ describe("VoiceRelay", () => {
     expect(r.out.at(-2)).toEqual({ t: "error", code: "voice.upstream_closed" });
   });
 
+  test("a failed replacement is detached and closed, so its queued frames never pass as the live session's", () => {
+    const r = ready();
+    r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });
+    r.sockets[0]?.push({ goAway: { timeLeft: { seconds: 20 } } });
+    const failed = r.sockets[1];
+    r.sockets[1]?.fail();
+    expect(failed?.closed).toBe(true);
+    expect(failed?.handlers).toBeNull();
+    const before = r.out.length;
+    failed?.push({ serverContent: { turnComplete: true } });
+    expect(r.out).toHaveLength(before);
+  });
+
   test("a retry that comes up swaps in and resets the budget", () => {
     const r = ready();
     r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });

@@ -282,7 +282,14 @@ export class VoiceRelay {
    */
   private replacementFailed(): void {
     clearTimeout(this.pendingTimer);
+    // A failed replacement is cut loose before another is tried: left attached it could still
+    // deliver queued frames, and `pending` no longer names it, so they would pass as the live session's.
+    const failed = this.pending;
     this.pending = null;
+    if (failed !== null) {
+      failed.detach();
+      failed.close(1000, "failed");
+    }
     if (this.ended) return;
     if (this.handle !== undefined && this.resumeAttempts < MAX_RESUME_ATTEMPTS) {
       this.resumeAttempts += 1;

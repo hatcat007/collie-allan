@@ -46,7 +46,7 @@ export interface VoiceHost {
  */
 const KEYS = new Set(["Enter", "Escape", "Up", "Down", "Tab"]);
 
-type Confirm = { kind: "send"; text: string } | { kind: "key"; key: string };
+type Confirm = { kind: "send"; text: string; callId: string } | { kind: "key"; key: string; callId: string };
 
 interface VoiceSheetProps {
   open: boolean;
@@ -65,6 +65,8 @@ export function VoiceSheet({ open, onClose, paneKey, host }: VoiceSheetProps) {
   // span and the handler refuses a second entry, so one intended Enter is never delivered twice.
   const [confirming, setConfirming] = useState(false);
   const taken = useRef(false);
+  // The tool call the open confirmation answers, so a cancellation of some OTHER call leaves it alone.
+  const askedBy = useRef<string | null>(null);
   const hostRef = useRef(host);
   hostRef.current = host;
   // The draft as it stood when dictation began: dictated words are appended to it, replacing their
@@ -83,6 +85,7 @@ export function VoiceSheet({ open, onClose, paneKey, host }: VoiceSheetProps) {
       // dropped: a resolver nobody calls is a tool call the model waits on forever.
       answer.current?.({ status: "declined" });
       answer.current = resolve;
+      askedBy.current = what.callId;
       setConfirming(false);
       setConfirm(what);
     });
@@ -91,6 +94,7 @@ export function VoiceSheet({ open, onClose, paneKey, host }: VoiceSheetProps) {
   const settle = useCallback((outcome: ToolOutcome) => {
     answer.current?.(outcome);
     answer.current = null;
+    askedBy.current = null;
     taken.current = false;
     setConfirming(false);
     setConfirm(null);
@@ -105,15 +109,18 @@ export function VoiceSheet({ open, onClose, paneKey, host }: VoiceSheetProps) {
       const lead = base.current === "" || /\s$/.test(base.current) ? base.current : `${base.current} `;
       hostRef.current.setDraft(`${lead}${text}`);
     },
-    sendReply: (text) => (lockedNow() ? Promise.resolve(blocked()) : ask({ kind: "send", text })),
-    pressKey: (key) =>
+    sendReply: (text, callId) =>
+      lockedNow() ? Promise.resolve(blocked()) : ask({ kind: "send", text, callId }),
+    pressKey: (key, callId) =>
       KEYS.has(key) && !lockedNow()
-        ? ask({ kind: "key", key })
+        ? ask({ kind: "key", key, callId })
         : Promise.resolve({ status: "error", detail: "that key is not available" } satisfies ToolOutcome),
     // The model withdrew the call. A confirmation already mid-action keeps going: it is the
     // operator's confirmed act, and `settle` is idempotent for it.
-    cancelPending: () => {
-      if (!taken.current) settle({ status: "declined" });
+    cancelPending: (callIds) => {
+      if (!taken.current && askedBy.current !== null && callIds.includes(askedBy.current)) {
+        settle({ status: "declined" });
+      }
     },
   };
 
