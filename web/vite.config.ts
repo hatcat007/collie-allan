@@ -328,7 +328,12 @@ export default defineConfig({
         // may carry the playground's — see vite-icons.ts's precacheIgnoresFor. Without this, a
         // release SW precached the dev AND playground icon sets too, every byte of it competing
         // with the app's own polls on a slow link (2026-09-12 proxy log on a phone).
-        globIgnores: precacheIgnoresFor(channel),
+        globIgnores: [
+          ...precacheIgnoresFor(channel),
+          // Voice mode's Persona chunk (Rive, ADR 0081) loads when the voice sheet first opens, like
+          // the Nerd Font subsets above: a herd that never speaks should not pay for it on install.
+          "**/persona-*.js",
+        ],
       },
       // Over plain HTTP (insecure context) the SW can't register; in dev we don't want it anyway.
       devOptions: { enabled: false },

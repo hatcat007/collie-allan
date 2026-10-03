@@ -102,6 +102,7 @@ The config file groups every setting under a `[section]`. The environment name o
 | `update` | where releases come from, how many versions stay, a GitHub token for the release check |
 | `serve` | whether Collie publishes the front door, on what, and under which path (`base_path`) |
 | `stt` | speech-to-text, absent until `collie stt setup` runs |
+| `voice` | voice mode, absent until `collie voice setup` runs |
 
 To read history from multiple agent home directories, provide a comma-separated list in
 `COLLIE_TRANSCRIPT_ROOT`.

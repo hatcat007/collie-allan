@@ -1416,6 +1416,12 @@ export interface BridgeConfig {
    */
   stt?: SttCapability;
   /**
+   * Voice mode, when the operator configured a Gemini Live key. Mirrors `VoiceCapability` in
+   * bridge/types.ts. **Absent is the feature being off**, and also what every older bridge sends, so
+   * the phone offers no voice row at all.
+   */
+  voice?: VoiceCapability;
+  /**
    * What this collie accepts as an attachment. Mirrors `UploadCapability` in bridge/types.ts.
    *
    * **Absent is a bridge older than the field**, and the phone reads that as the contract that
@@ -1449,6 +1455,12 @@ export interface SttCapability {
   available: boolean;
   /** Operator-facing prose when it could not. Absent when it could. */
   reason?: string;
+}
+
+/** What `/api/config` says about voice mode: a label and the model id, never the key. */
+export interface VoiceCapability {
+  provider: string;
+  model: string;
 }
 
 /**

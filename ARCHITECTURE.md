@@ -169,7 +169,10 @@ Product details that shaped the loop:
   runs**: no key, no outbound path, no child process, no button. Turning it on is what buys the
   credential in the state dir and the outbound path carrying microphone audio — a local engine keeps
   that egress on loopback, and hands-free sends go through the same guarded reply path a typed reply
-  takes ([ADR 0029](./.adr/0029-speech-to-text-is-a-provider-seam-collie-owns.md)).
+  takes ([ADR 0029](./.adr/0029-speech-to-text-is-a-provider-seam-collie-owns.md)). Voice mode is
+  the second such seam (`bridge/voice/`, CLI `cli/voice.ts`): a Gemini Live relay that is absent
+  until `collie voice setup`, executes no tool, and leaves every action to the phone's guarded
+  path ([ADR 0081](./.adr/0081-voice-mode-is-a-bridge-relay-and-the-csp-gains-one-wasm-word.md)).
 - **Quick replies are heuristics, not guarantees.** Different agents expect different input (a Y/n
   prompt vs a numbered menu vs an approval phrase), so there is always a **"send exactly what I
   type"** fallback.

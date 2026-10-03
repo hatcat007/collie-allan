@@ -29,6 +29,7 @@ If the host runs multiple instances, prepend `COLLIE_INSTANCE=<name>` to every v
 | **Logs** | `collie logs` | Tail the service log |
 | **Config** | `collie config show` · `collie config check` · `collie config init` | Print every setting with its source, validate the file, or write a commented `config.toml` ([the config file](configure.md#the-config-file)) |
 | **Voice** | `collie stt setup` · `stt test` · `stt status` · `stt off` | Configure / check / disable [voice input](voice-and-push.md#voice-input-optional) |
+| **Voice mode** | `collie voice setup` · `voice test` · `voice status` · `voice off` | Configure / check / disable [Gemini Live voice mode](voice-and-push.md#voice-mode-optional) |
 | **Push keys** | `collie push-keys` | Generate the VAPID keypair into your `.env` |
 | **Push test** | `collie push-test` | Send one notification to prove it works |
 

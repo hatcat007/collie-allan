@@ -1143,6 +1143,16 @@ export async function pairDevice(code: string, label: string): Promise<PairResul
   return "token" in res ? { ok: true, token: res.token, label: res.label } : res;
 }
 
+/**
+ * Mint a one-use ticket for the voice socket (`POST /api/voice/ticket`). Write-gated, so it carries
+ * the same proof typing does; the WebSocket itself cannot carry the pairing bearer header, which is
+ * why the ticket exists (bridge/voice/ticket.ts).
+ */
+export async function voiceTicket(): Promise<string> {
+  const res = await req<{ ticket: string }>("/api/voice/ticket", { method: "POST" });
+  return res.ticket;
+}
+
 /** The paired-device registry. Read-level, so an unpaired device may ask (and learn it is unpaired). */
 export function fetchDevices(signal?: AbortSignal): Promise<DevicesResponse> {
   return req<DevicesResponse>("/api/devices", { signal });

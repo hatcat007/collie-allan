@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Copy, Maximize2, MessagesSquare, Monitor, Pencil, Pin, PinOff, ScrollText, Search, SlidersHorizontal, SquareTerminal, XCircle } from "lucide-react";
+import { AudioLines, Copy, Maximize2, MessagesSquare, Monitor, Pencil, Pin, PinOff, ScrollText, Search, SlidersHorizontal, SquareTerminal, XCircle } from "lucide-react";
 
 import { BottomSheet } from "@/components/ui/sheet";
 import { ActionRow, DestructiveActionRow, RenameView } from "@/components/action-sheet-rows";
@@ -92,6 +92,12 @@ interface PaneActionsSheetProps {
    *  buffered output to look at. Absence IS the gate, exactly as it is for find and history above —
    *  a device that never asked for zen sees a sheet byte-identical to today's. */
   onZen?: () => void;
+  /**
+   * Open voice mode on this pane (ADR 0081). Absence IS the gate, like zen above: the pane view
+   * passes it only when the bridge published a Gemini key AND this browser can capture audio, and a
+   * read-only or gone pane has nothing to talk to.
+   */
+  onVoice?: () => void;
 
   /**
    * Every pane the caller's list holds, agents and shells. The pins store reads it on a pin or unpin
@@ -135,6 +141,7 @@ export function PaneActionsSheet({
   onCopyOutput,
   onSettings,
   onZen,
+  onVoice,
   paneView,
   onPaneViewChange,
   paneViewNote,
@@ -427,6 +434,17 @@ export function PaneActionsSheet({
               onClick={() => {
                 onClose();
                 onZen();
+              }}
+            />
+          )}
+          {onVoice && (
+            <ActionRow
+              icon={<AudioLines className="size-4 shrink-0 text-muted-foreground" />}
+              label={t("voice.row.label")}
+              hint={t("voice.row.hint")}
+              onClick={() => {
+                onClose();
+                onVoice();
               }}
             />
           )}

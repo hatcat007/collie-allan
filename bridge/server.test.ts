@@ -1813,6 +1813,23 @@ describe("muxLogoResponse — serving an adapter's mark", () => {
   });
 });
 
+describe("bridgeConfigBody — voice mode is omitted until configured", () => {
+  const base = { push: false, vapidPublicKey: "", build: "unknown" };
+
+  test("an install with no key ships the byte-identical body it always did", () => {
+    expect("voice" in bridgeConfigBody({ ...base, mode: "solo" })).toBe(false);
+  });
+
+  test("a configured one carries the provider and model, never the key", () => {
+    const body = bridgeConfigBody({
+      ...base,
+      mode: "solo",
+      voice: { provider: "gemini-live", model: "gemini-3.8-live" },
+    });
+    expect(body.voice).toEqual({ provider: "gemini-live", model: "gemini-3.8-live" });
+  });
+});
+
 describe("bridgeConfigBody — the mux block is appended, never reordering what came before", () => {
   const base = { push: true, vapidPublicKey: "BKey", build: "abc123", mode: "solo" } as const;
   const mux = { mux: "reference", capabilities: declareCapabilities({ supports: ["paneGrid"], topologyLatency: { kind: "push" } }) };

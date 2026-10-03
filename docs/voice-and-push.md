@@ -157,6 +157,58 @@ The reasoning for all of the above — why this was declined twice, what changed
 looks like this — is [ADR 0029](../.adr/0029-speech-to-text-is-a-provider-seam-collie-owns.md).
 
 
+## Voice mode (optional)
+
+Talk to an agent with Gemini Live. It reads the pane, drafts a reply and sends it when you confirm.
+
+```sh
+collie voice setup --key <gemini-api-key>
+collie voice test
+```
+
+**It does not exist until you run `collie voice setup`.** No row is drawn and nothing leaves the
+host. Setup takes effect on the running bridge with no restart. Get a key at
+[aistudio.google.com/apikey](https://aistudio.google.com/apikey).
+
+1. Run `collie voice setup --key <gemini-api-key>` on the machine that runs the bridge.
+2. Run `collie voice test` to open one real session and confirm the key and model work.
+3. Open a pane on the phone, tap the ⋮ menu, then **Voice mode**.
+
+The sheet has two modes, chosen before you start:
+
+| Mode | What it does |
+| --- | --- |
+| **Agent** | A conversation. Gemini can read the pane, draft into the reply box, and ask to send or press a key. |
+| **Dictate** | You speak and the words land in the reply box. Nothing is sent and no voice is played. |
+
+A spoken send is never a send around the guard. `send_reply` and `press_key` each show a card with
+the exact text or key and wait for your tap, then go through the same verified path the Send button
+uses. The Persona avatar shows listening, thinking and speaking.
+
+> **Note.** While a session is open, your voice and the pane's screen text go to Google through your
+> bridge. The key stays in `voice.json` at mode 0600 and never reaches the phone.
+
+### Settings
+
+| Setting | `voice.json` key | Environment | Default |
+| --- | --- | --- | --- |
+| Gemini key | `apiKey` | `COLLIE_VOICE_KEY` | required |
+| Model | `model` | `COLLIE_VOICE_MODEL` | `gemini-3.8-live` |
+| Spoken language | `language` | `COLLIE_VOICE_LANG` | auto-detect |
+| Gemini voice | `voiceName` | `COLLIE_VOICE_NAME` | the model's own |
+
+The model is one of `gemini-3.8-live`, `gemini-3.8-live-extended-thinking` or
+`gemini-3.1-flash-live-preview`. The environment wins over the file, field by field.
+
+```sh
+collie voice status   # what is on, and where each setting came from
+collie voice off      # remove voice.json
+```
+
+One session runs at a time and ends after an hour, when the page is hidden, or when you leave the
+pane. Voice mode needs a secure context (`tailscale serve`), because browsers refuse the
+microphone over plain HTTP.
+
 ## Web Push (optional)
 
 Disabled by default. Setup requires three steps. The sender library (`web-push`) is included as an

@@ -70,6 +70,12 @@ PATH. Details and rollback: [`docs/upgrading.md`](./docs/upgrading.md) → *Upgr
   phone, and relays audio and the model's tool calls over a one-use-ticket WebSocket at `/api/voice`.
   `collie voice test`, `status` and `off` complete the verb. It is off until you run setup, and the
   default model is `gemini-3.8-live`.
+- **Voice mode on the phone: talk to an agent with the Persona avatar.** Open a pane's ⋮ menu and
+  tap Voice mode (it appears once `collie voice setup` has run). Agent mode is a Gemini Live
+  conversation that can read the pane, draft a reply and ask to send it or press a key, each behind
+  your tap and through the same guarded send as the Send button. Dictate mode types what you say
+  into the reply box and sends nothing. The Persona avatar and its WebAssembly runtime are bundled
+  and load only when the sheet opens, and the CSP gains `'wasm-unsafe-eval'`.
 
 ### Changed
 
