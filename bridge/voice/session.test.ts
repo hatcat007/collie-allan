@@ -212,6 +212,18 @@ describe("VoiceRelay", () => {
     expect(frames[1]).toHaveProperty("toolResponse.functionResponses");
   });
 
+  test("repeated stream ends during the gap are held once", () => {
+    const r = ready();
+    r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });
+    r.sockets[0]?.push({ goAway: { timeLeft: { seconds: 20 } } });
+    r.sockets[0]?.drop();
+    for (let i = 0; i < 5; i++) r.relay.onClientMessage({ t: "end" });
+    r.sockets[1]?.open();
+    r.sockets[1]?.push({ setupComplete: {} });
+    const ends = r.sockets[1]?.frames().filter((f) => JSON.stringify(f).includes("audioStreamEnd")) ?? [];
+    expect(ends).toHaveLength(1);
+  });
+
   test("a replacement that fails after the GoAway deadline is not retried", async () => {
     const r = ready();
     r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });

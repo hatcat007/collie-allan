@@ -53,6 +53,8 @@ export const MAX_RESUME_ATTEMPTS = 2;
 /** A replacement that has not come up by now is a failed one, not a slow one. */
 export const DEFAULT_RESUME_TIMEOUT_MS = 10_000;
 
+const STREAM_END = JSON.stringify(buildAudioStreamEnd());
+
 /** Audio frames kept for a replacement still in setup: about this many 128 ms blocks, no more. */
 const MAX_HELD_FRAMES = 64;
 /** A session is cut here whatever else happens: an open microphone is not a standing service. */
@@ -140,7 +142,7 @@ export class VoiceRelay {
       if (data === null || data.length > MAX_AUDIO_CHUNK_CHARS) return this.fail("voice.bad_message");
       this.sendUpstream(JSON.stringify(buildAudioFrame(data)), true);
     } else if (t === "end") {
-      this.sendUpstream(JSON.stringify(buildAudioStreamEnd()), false);
+      this.sendUpstream(STREAM_END, false);
     } else if (t === "tool_result") {
       this.onToolResult(o);
     } else {
@@ -155,6 +157,9 @@ export class VoiceRelay {
    */
   private sendUpstream(text: string, audio: boolean): void {
     if (this.retiredGone && this.pending !== null) {
+      // Bounded without a cap of its own: audio is trimmed below, a tool result is held once per
+      // awaited call id (`onToolResult` deletes the id as it sends), and one stream end says it all.
+      if (!audio && text === STREAM_END && this.held.some((f) => f.text === STREAM_END)) return;
       this.held.push({ text, audio });
       let audioHeld = this.held.filter((f) => f.audio).length;
       while (audioHeld > MAX_HELD_FRAMES) {
