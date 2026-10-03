@@ -155,6 +155,7 @@ describe("voice status and off", () => {
     const d = deps({ env: { [VOICE_ENV_KEYS.key]: "AIza-env" } });
     await cmdVoiceSetup(d, ["--key", "k"]);
     d.io.stdout.length = 0;
+    d.io.stderr.length = 0;
     expect(cmdVoiceOff(d)).toBe(EXIT.OK);
     const out = said(d);
     expect(out).toContain("removed");

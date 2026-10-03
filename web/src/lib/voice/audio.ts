@@ -44,6 +44,10 @@ export function createVoiceAudio(): VoiceAudio {
   let capture: Capture | null = null;
   let closed = false;
   let speaker: AudioContext | null = null;
+  // The capture context made inside the Start tap, waiting for `startCapture` to take it. It is
+  // created there because the microphone prompt and the worklet load are awaits, and a context made
+  // after them is not in a gesture any more: mobile browsers leave it suspended and it posts nothing.
+  let primedCapture: AudioContext | null = null;
   let nextStart = 0;
   const active = new Set<AudioBufferSourceNode>();
   let idleCallback: (() => void) | null = null;
@@ -54,6 +58,12 @@ export function createVoiceAudio(): VoiceAudio {
     if (capture === null) return;
     release(capture);
     capture = null;
+  };
+
+  const dropPrimedCapture = (): void => {
+    const unused = primedCapture;
+    primedCapture = null;
+    void unused?.close();
   };
 
   const flush = (): void => {
@@ -86,8 +96,12 @@ export function createVoiceAudio(): VoiceAudio {
           audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         });
         if (superseded()) throw new Error("capture stopped before the microphone opened");
-        held.context = new AudioContext();
+        held.context = primedCapture ?? new AudioContext();
+        primedCapture = null;
         const { context } = held;
+        // A refusal to run is a capture that cannot work: it ends the start like a denied microphone.
+        await context.resume();
+        if (superseded()) throw new Error("capture stopped before the context resumed");
         await context.audioWorklet.addModule(mounted(WORKLET));
         if (superseded()) throw new Error("capture stopped before the worklet loaded");
         const node = new AudioWorkletNode(context, "collie-capture");
@@ -127,6 +141,10 @@ export function createVoiceAudio(): VoiceAudio {
       if (closed) return;
       speaker ??= new AudioContext({ sampleRate: PLAYBACK_RATE });
       void speaker.resume();
+      if (primedCapture === null) {
+        primedCapture = new AudioContext();
+        void primedCapture.resume();
+      }
     },
     play(base64) {
       speaker ??= new AudioContext({ sampleRate: PLAYBACK_RATE });
@@ -159,6 +177,7 @@ export function createVoiceAudio(): VoiceAudio {
       closed = true;
       decode = createPcm16Decoder();
       stopCapture();
+      dropPrimedCapture();
       flush();
       void speaker?.close();
       speaker = null;

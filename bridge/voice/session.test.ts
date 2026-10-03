@@ -175,11 +175,21 @@ describe("VoiceRelay", () => {
     expect(r.ended()).toBe(0);
     // Each stalled replacement times out and is retried; the budget runs out and the dead socket
     // can no longer be hidden behind a live-looking session.
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    for (let i = 0; i < 2000 && r.ended() === 0; i++) await new Promise((resolve) => setTimeout(resolve, 1));
     expect(r.sockets.length).toBe(4);
     expect(r.sockets.slice(1).every((s) => s.closed)).toBe(true);
     expect(r.out.at(-2)).toEqual({ t: "error", code: "voice.upstream_closed" });
     expect(r.ended()).toBe(1);
+  });
+
+  test("a replacement is abandoned when the GoAway runs out, not after the usual ten seconds", async () => {
+    const r = ready();
+    r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });
+    r.sockets[0]?.push({ goAway: { timeLeft: { seconds: 0.01 } } });
+    for (let i = 0; i < 2000 && r.sockets[1]?.closed !== true; i++) await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(r.sockets[1]?.closed).toBe(true);
+    // The old socket is about to go: a retry would outlive it.
+    expect(r.sockets).toHaveLength(2);
   });
 
   test("a repeated GoAway after the budget is spent does not open another replacement", () => {

@@ -94,6 +94,8 @@ export class VoiceRelay {
   private resumeAttempts = 0;
   /** A GoAway arrived before there was a handle to resume by; the replacement opens when one does. */
   private goAwayWaiting = false;
+  /** Epoch ms by which Gemini said it will drop the retiring socket, or null when it gave no time. */
+  private goAwayAt: number | null = null;
   private pendingTimer: ReturnType<typeof setTimeout> | undefined;
   /** The retiring socket closed while its replacement was still coming up. */
   private retiredGone = false;
@@ -170,7 +172,7 @@ export class VoiceRelay {
         socket.detach();
         socket.close(1000, "timeout");
         this.replacementFailed();
-      }, this.opts.resumeTimeoutMs ?? DEFAULT_RESUME_TIMEOUT_MS);
+      }, this.replacementDeadlineMs());
     } else {
       this.upstream = socket;
     }
@@ -223,6 +225,7 @@ export class VoiceRelay {
         this.upstream = this.pending;
         this.pending = null;
         this.resumeAttempts = 0;
+        this.goAwayAt = null;
         this.retiredGone = false;
         if (old !== null) {
           old.detach();
@@ -253,6 +256,7 @@ export class VoiceRelay {
         if (this.goAwayWaiting && this.pending === null) this.beginResume();
         return;
       case "go_away":
+        this.goAwayAt = event.seconds === null ? null : Date.now() + event.seconds * 1000;
         // Reconnect ahead of the deadline, resuming by handle; the swap happens on setup_complete.
         // No handle yet: remember the GoAway and open the replacement when one arrives.
         if (this.handle === undefined) this.goAwayWaiting = true;
@@ -280,6 +284,12 @@ export class VoiceRelay {
    * retiring socket, so try again while the handle is good; once the attempts are spent the old
    * socket is left to close, which ends the session with its own code and tells the phone.
    */
+  /** How long a replacement may take: the usual deadline, never past the moment the old socket goes. */
+  private replacementDeadlineMs(): number {
+    const base = this.opts.resumeTimeoutMs ?? DEFAULT_RESUME_TIMEOUT_MS;
+    return this.goAwayAt === null ? base : Math.max(0, Math.min(base, this.goAwayAt - Date.now()));
+  }
+
   private replacementFailed(): void {
     clearTimeout(this.pendingTimer);
     // A failed replacement is cut loose before another is tried: left attached it could still
@@ -291,7 +301,11 @@ export class VoiceRelay {
       failed.close(1000, "failed");
     }
     if (this.ended) return;
-    if (this.handle !== undefined && this.resumeAttempts < MAX_RESUME_ATTEMPTS) {
+    if (
+      this.handle !== undefined &&
+      this.resumeAttempts < MAX_RESUME_ATTEMPTS &&
+      (this.goAwayAt === null || Date.now() < this.goAwayAt)
+    ) {
       this.resumeAttempts += 1;
       this.connect(true);
       return;

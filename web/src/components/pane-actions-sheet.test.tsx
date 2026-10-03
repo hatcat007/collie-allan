@@ -520,6 +520,21 @@ describe("PaneActionsSheet — pin", () => {
     expect(pinMatcher(currentPins())(quiet)).toBe(true);
   });
 
+  it("withholds Voice mode on a pane whose machine is unreachable", () => {
+    const roster: ServerSummary[] = [
+      { id: "bluefin", name: "bluefin", isLead: true, reachable: true, protocol: "ok", lastSeenAt: 9_000 },
+      { id: "workshop", name: "workshop", isLead: false, reachable: false, protocol: "ok", lastSeenAt: 1_000 },
+    ];
+    render(<PaneActionsSheet {...renderProps({ onVoice: vi.fn(), pane: { ...agent, host: "workshop" } })} />, {
+      wrapper: ({ children }) => (
+        <CrewProvider servers={roster} ts={20_000} pollMs={1500}>
+          {children}
+        </CrewProvider>
+      ),
+    });
+    expect(screen.queryByRole("button", { name: /Voice mode/ })).toBeNull();
+  });
+
   it("drops the pin when Close succeeds", async () => {
     const user = userEvent.setup();
     setPinned(agent, true, [agent]);

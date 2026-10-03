@@ -935,7 +935,7 @@ export const ja: Dictionary = {
   "apiError.stt.empty": "録音データが空です。",
   "apiError.stt.provider_failed": "文字起こしに失敗しました: {reason}",
   "apiError.voice.unconfigured": "この collie では音声モードが設定されていません。",
-  "apiError.voice.busy": "音声セッションの開始が続けて行われました。時間をおいて再試行してください。",
+  "apiError.voice.busy": "音声セッションの開始が立て続けに発生しました。時間をおいて再試行してください。",
   "voice.row.label": "音声モード",
   "voice.row.hint": "このエージェントと話す",
   "voice.title": "音声",

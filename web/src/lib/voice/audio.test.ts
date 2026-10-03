@@ -202,10 +202,22 @@ describe("createVoiceAudio capture teardown", () => {
   test("prime unlocks the speaker inside the gesture and is a no-op after close", () => {
     const audio = createVoiceAudio();
     audio.prime();
-    expect(contextsOpened).toBe(1);
-    expect(contextsResumed).toBe(1);
+    // The speaker and the capture context: both are made inside the tap.
+    expect(contextsOpened).toBe(2);
+    expect(contextsResumed).toBe(2);
     audio.close();
+    expect(contextsClosed).toBe(2);
     audio.prime();
-    expect(contextsOpened).toBe(1);
+    expect(contextsOpened).toBe(2);
+  });
+
+  test("startCapture takes the context made in the tap and resumes it", async () => {
+    const audio = createVoiceAudio();
+    audio.prime();
+    const started = audio.startCapture(() => {});
+    releaseMic?.();
+    await started;
+    expect(contextsOpened).toBe(2);
+    expect(contextsResumed).toBe(3);
   });
 });
