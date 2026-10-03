@@ -45,13 +45,16 @@ type RawSettings = ReturnType<typeof coerceVoiceFile>;
 
 const settingsPath = (deps: VoiceDeps): string => join(deps.ctx.stateDir, VOICE_FILENAME);
 
-function readFileSettings(deps: VoiceDeps): RawSettings {
+function readFileSettings(deps: VoiceDeps, warn?: (message: string) => void): RawSettings {
   const raw = deps.files.read(settingsPath(deps));
   if (raw === null) return coerceVoiceFile(undefined);
   try {
     // SAFETY: `JSON.parse` answers with a JSON value, and `coerceVoiceFile` is its only reader.
-    return coerceVoiceFile(JSON.parse(raw) as JsonValue);
+    return coerceVoiceFile(JSON.parse(raw) as JsonValue, warn);
   } catch {
+    // The running bridge keeps its last good file on a parse failure, so "nothing configured" would
+    // be untrue here: say the file is broken instead.
+    warn?.(`${VOICE_FILENAME} could not be parsed`);
     return coerceVoiceFile(undefined);
   }
 }
@@ -214,9 +217,9 @@ export async function cmdVoiceTest(deps: VoiceDeps): Promise<number> {
 
 /** `collie voice status` — what is configured, and where each part came from. Never the key. */
 export function cmdVoiceStatus(deps: VoiceDeps): number {
-  const file = readFileSettings(deps);
-  const env = voiceEnvSettings(deps.ctx.env);
   const warnings: string[] = [];
+  const file = readFileSettings(deps, (m) => warnings.push(m));
+  const env = voiceEnvSettings(deps.ctx.env);
   const settings = resolveVoiceSettings(file, env, (m) => warnings.push(m));
   const path = settingsPath(deps);
   const source = (name: keyof RawSettings): string => {

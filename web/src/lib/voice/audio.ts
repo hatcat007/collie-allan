@@ -87,6 +87,8 @@ export function createVoiceAudio(): VoiceAudio {
   return {
     async startCapture(onChunk) {
       if (closed) throw new Error("voice audio is closed");
+      // A second start must not orphan the first: release it so its stream and context close.
+      stopCapture();
       const held: Capture = { stream: null, context: null, node: null, detach: new AbortController() };
       capture = held;
       // True once teardown has run (or a newer capture replaced this one) while an await was pending.

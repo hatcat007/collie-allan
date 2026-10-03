@@ -7,7 +7,7 @@
   and the conditional egress this extends) ·
   [ADR 0034](./0034-collie-collects-nothing-and-opt-in-is-the-ceiling.md) (opt-in is the ceiling) ·
   [ADR 0017](./0017-recognising-a-password-prompt-changes-what-collie-says.md) (no spoken secret)
-- **Trail:** the operator's request for a Gemini Live voice mode with the ai-elements Persona avatar,
+- **Trail:** [hatcat007/collie-allan#1](https://github.com/hatcat007/collie-allan/pull/1), from the operator's request for a Gemini Live voice mode with the ai-elements Persona avatar,
   which weighed a browser-to-Google socket with an ephemeral token against a bridge relay, and
   weighed Persona's CDN-hosted Rive assets against bundling them · `bridge/voice/` ·
   `bridge/server.ts` (`CSP`, `/api/voice`) · `web/src/components/ai-elements/persona.tsx`
@@ -36,8 +36,8 @@ a WASM module under `script-src 'self'` without `'wasm-unsafe-eval'`.
    ticket good for 30 seconds and one upgrade. One session at a time per process, one hour at most.
 3. **The bridge executes no tool.** It declares four, `read_pane`, `draft_reply`, `send_reply` and
    `press_key`, and relays each call to the phone. The phone runs them through the same guarded path
-   typing uses (`sendGuardedReply`), and a send or a key press waits on a tap. A spoken send is never
-   a send around the reply guard.
+   typing uses for a send (`sendGuardedReply`), a key press goes through the composer's key path, and
+   both wait on a tap. A spoken send is never a send around the reply guard.
 4. **Persona is bundled, not fetched.** The six `.riv` scenes sit in `web/public/persona/` and the
    WASM is a hashed asset of the bundle. Neither is precached; they load when the voice sheet opens.
 5. **The CSP gains `'wasm-unsafe-eval'` in `script-src` and nothing else.** It permits compiling WASM

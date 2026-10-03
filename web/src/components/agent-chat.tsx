@@ -2602,7 +2602,12 @@ export function AgentChat({
             onClose={closeDrawer}
             paneKey={`${scope?.host ?? ""}\0${scope?.session ?? ""}\0${paneId}`}
             host={{
-              readPane: () => text,
+              // Words, not the mirror's colour escapes: they would spend the model's character budget
+              // and a tail cut could land inside one. `logicalText` has no hard wraps.
+              readPane: () =>
+                parseAnsi(logicalText || text)
+                  .map((segment) => segment.text)
+                  .join(""),
               getDraft: () => composerRef.current?.getDraft() ?? "",
               // Asked when a tool runs, so the composer's own live refusal state decides a send.
               isLocked: () => composerRef.current?.isLocked() ?? true,

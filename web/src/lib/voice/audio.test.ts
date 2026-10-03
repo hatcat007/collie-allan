@@ -176,6 +176,18 @@ describe("createVoiceAudio capture teardown", () => {
     expect(tracks.stopped).toBe(1);
   });
 
+  test("a second start releases the first capture instead of orphaning it", async () => {
+    const audio = createVoiceAudio();
+    const first = audio.startCapture(() => {});
+    releaseMic?.();
+    await first;
+    const second = audio.startCapture(() => {});
+    expect(tracks.stopped).toBe(1);
+    expect(contextsClosed).toBe(1);
+    releaseMic?.();
+    await second;
+  });
+
   test("an interruption drops the decoder's held byte, so the next response is not shifted", () => {
     const sources: number[][] = [];
     vi.stubGlobal("AudioContext", class {

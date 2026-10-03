@@ -151,6 +151,13 @@ describe("voice status and off", () => {
     expect(said(d)).toContain("already off");
   });
 
+  test("status reports a voice.json that does not parse instead of calling it unconfigured", () => {
+    const d = deps({ seed: { [CONFIG_PATH]: "{not json" } });
+    expect(cmdVoiceStatus(d)).toBe(EXIT.FAIL);
+    expect(said(d)).toContain("could not be parsed");
+    expect(said(d)).not.toContain("nothing configured");
+  });
+
   test("off does not claim voice is off while the environment still configures it", async () => {
     const d = deps({ env: { [VOICE_ENV_KEYS.key]: "AIza-env" } });
     await cmdVoiceSetup(d, ["--key", "k"]);

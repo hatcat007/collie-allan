@@ -185,9 +185,12 @@ The sheet has two modes, chosen before you start:
 | **Agent** | A conversation. Gemini can read the pane, draft into the reply box, and ask to send or press a key. |
 | **Dictate** | You speak and the words land in the reply box. Nothing is sent and no voice is played. |
 
-A spoken send is never a send around the guard. `send_reply` and `press_key` each show a card with
-the exact text or key and wait for your tap, then go through the same verified path the Send button
-uses. The Persona avatar shows listening, thinking and speaking.
+`send_reply` shows the exact text and waits for your tap, then follows the same path as the Send
+button, reply guard included. `press_key` shows the key and waits for your tap, then uses the
+composer's key path. That path refuses while the composer is locked; it does not verify the pane's
+screen.
+
+The Persona avatar shows listening, thinking and speaking.
 
 > **Note.** While a session is open, your voice and the pane's screen text go to Google through your
 > bridge. The key stays in `voice.json` at mode 0600 and never reaches the phone.
