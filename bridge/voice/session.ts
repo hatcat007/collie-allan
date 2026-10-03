@@ -172,7 +172,7 @@ export class VoiceRelay {
         socket.detach();
         socket.close(1000, "timeout");
         this.replacementFailed();
-      }, this.replacementDeadlineMs());
+      }, this.opts.resumeTimeoutMs ?? DEFAULT_RESUME_TIMEOUT_MS);
     } else {
       this.upstream = socket;
     }
@@ -284,12 +284,6 @@ export class VoiceRelay {
    * retiring socket, so try again while the handle is good; once the attempts are spent the old
    * socket is left to close, which ends the session with its own code and tells the phone.
    */
-  /** How long a replacement may take: the usual deadline, never past the moment the old socket goes. */
-  private replacementDeadlineMs(): number {
-    const base = this.opts.resumeTimeoutMs ?? DEFAULT_RESUME_TIMEOUT_MS;
-    return this.goAwayAt === null ? base : Math.max(0, Math.min(base, this.goAwayAt - Date.now()));
-  }
-
   private replacementFailed(): void {
     clearTimeout(this.pendingTimer);
     // A failed replacement is cut loose before another is tried: left attached it could still
@@ -304,6 +298,8 @@ export class VoiceRelay {
     if (
       this.handle !== undefined &&
       this.resumeAttempts < MAX_RESUME_ATTEMPTS &&
+      // A replacement already in flight keeps its full setup window; only a NEW attempt waits on the
+      // GoAway, because one opened after the old socket is gone has nothing to take over from.
       (this.goAwayAt === null || Date.now() < this.goAwayAt)
     ) {
       this.resumeAttempts += 1;

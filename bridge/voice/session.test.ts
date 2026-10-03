@@ -182,13 +182,25 @@ describe("VoiceRelay", () => {
     expect(r.ended()).toBe(1);
   });
 
-  test("a replacement is abandoned when the GoAway runs out, not after the usual ten seconds", async () => {
+  test("a replacement still in setup past the GoAway deadline keeps its window and can swap in", async () => {
+    const r = ready(500);
+    r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });
+    r.sockets[0]?.push({ goAway: { timeLeft: { seconds: 0.005 } } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    r.sockets[0]?.drop();
+    r.sockets[1]?.open();
+    r.sockets[1]?.push({ setupComplete: {} });
+    expect(r.ended()).toBe(0);
+    r.relay.onClientMessage({ t: "audio", data: "AAA=" });
+    expect(r.sockets[1]?.frames().at(-1)).toHaveProperty("realtimeInput.audio.data", "AAA=");
+  });
+
+  test("a replacement that fails after the GoAway deadline is not retried", async () => {
     const r = ready();
     r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });
-    r.sockets[0]?.push({ goAway: { timeLeft: { seconds: 0.01 } } });
-    for (let i = 0; i < 2000 && r.sockets[1]?.closed !== true; i++) await new Promise((resolve) => setTimeout(resolve, 1));
-    expect(r.sockets[1]?.closed).toBe(true);
-    // The old socket is about to go: a retry would outlive it.
+    r.sockets[0]?.push({ goAway: { timeLeft: { seconds: 0.005 } } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    r.sockets[1]?.fail();
     expect(r.sockets).toHaveLength(2);
   });
 
