@@ -50,6 +50,8 @@ export const MAX_AUDIO_CHUNK_CHARS = 128 * 1024;
 export const MAX_TOOL_RESULT_CHARS = 64 * 1024;
 /** Replacement connections tried after a GoAway before the retiring socket is left to run out. */
 export const MAX_RESUME_ATTEMPTS = 2;
+/** A replacement that has not come up by now is a failed one, not a slow one. */
+export const DEFAULT_RESUME_TIMEOUT_MS = 10_000;
 /** A session is cut here whatever else happens: an open microphone is not a standing service. */
 export const MAX_SESSION_MS = 60 * 60 * 1000;
 
@@ -79,6 +81,8 @@ export interface VoiceRelayOptions {
   send: (message: VoiceClientMessage) => void;
   /** Called exactly once when the session is over, for any reason. */
   onEnd: () => void;
+  /** How long a replacement socket may take to come up before it counts as failed. */
+  resumeTimeoutMs?: number;
 }
 
 export class VoiceRelay {
@@ -90,6 +94,7 @@ export class VoiceRelay {
   private resumeAttempts = 0;
   /** A GoAway arrived before there was a handle to resume by; the replacement opens when one does. */
   private goAwayWaiting = false;
+  private pendingTimer: ReturnType<typeof setTimeout> | undefined;
   /** The retiring socket closed while its replacement was still coming up. */
   private retiredGone = false;
   private ended = false;
@@ -155,8 +160,20 @@ export class VoiceRelay {
 
   private connect(resuming: boolean): void {
     const socket = this.opts.open(geminiLiveUrl(this.opts.settings.apiKey));
-    if (resuming) this.pending = socket;
-    else this.upstream = socket;
+    if (resuming) {
+      this.pending = socket;
+      // A replacement that neither opens nor errors must not leave the session parked on a closing
+      // socket with the phone still talking into it: give it a deadline, then treat it as failed.
+      clearTimeout(this.pendingTimer);
+      this.pendingTimer = setTimeout(() => {
+        if (this.pending !== socket || this.ended) return;
+        socket.detach();
+        socket.close(1000, "timeout");
+        this.replacementFailed();
+      }, this.opts.resumeTimeoutMs ?? DEFAULT_RESUME_TIMEOUT_MS);
+    } else {
+      this.upstream = socket;
+    }
     socket.attach({
       open: () => {
         socket.send(JSON.stringify(buildSetup(this.opts.settings, this.mode, this.handle)));
@@ -173,7 +190,14 @@ export class VoiceRelay {
       },
       error: () => {
         if (socket === this.pending) return this.replacementFailed();
-        if (!this.ended) this.fail("voice.upstream_unavailable");
+        if (socket !== this.upstream || this.ended) return;
+        // Same rule as a close: the retiring socket failing while its replacement comes up is not
+        // the end of the conversation, only of that socket.
+        if (this.pending !== null) {
+          this.retiredGone = true;
+          return;
+        }
+        this.fail("voice.upstream_unavailable");
       },
       close: () => {
         if (socket === this.pending) return this.replacementFailed();
@@ -195,6 +219,7 @@ export class VoiceRelay {
     if (event.kind === "setup_complete") {
       if (from === this.pending) {
         const old = this.upstream;
+        clearTimeout(this.pendingTimer);
         this.upstream = this.pending;
         this.pending = null;
         this.resumeAttempts = 0;
@@ -231,7 +256,7 @@ export class VoiceRelay {
         // Reconnect ahead of the deadline, resuming by handle; the swap happens on setup_complete.
         // No handle yet: remember the GoAway and open the replacement when one arrives.
         if (this.handle === undefined) this.goAwayWaiting = true;
-        else if (this.pending === null) this.beginResume();
+        else if (this.pending === null && this.resumeAttempts < MAX_RESUME_ATTEMPTS) this.beginResume();
         return;
       case "tool_cancelled":
         for (const id of event.ids) this.awaiting.delete(id);
@@ -256,6 +281,7 @@ export class VoiceRelay {
    * socket is left to close, which ends the session with its own code and tells the phone.
    */
   private replacementFailed(): void {
+    clearTimeout(this.pendingTimer);
     this.pending = null;
     if (this.ended) return;
     if (this.handle !== undefined && this.resumeAttempts < MAX_RESUME_ATTEMPTS) {
@@ -291,6 +317,7 @@ export class VoiceRelay {
     if (this.ended) return;
     this.ended = true;
     if (this.timer !== undefined) clearTimeout(this.timer);
+    clearTimeout(this.pendingTimer);
     for (const socket of [this.upstream, this.pending]) {
       if (socket === null) continue;
       socket.detach();

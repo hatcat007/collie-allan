@@ -31,12 +31,15 @@ class FakeSocket implements UpstreamSocket {
   drop() {
     this.handlers?.close();
   }
+  fail() {
+    this.handlers?.error();
+  }
   frames(): JsonValue[] {
     return this.sent.map((s) => JSON.parse(s));
   }
 }
 
-function rig() {
+function rig(resumeTimeoutMs?: number) {
   const sockets: FakeSocket[] = [];
   const out: VoiceClientMessage[] = [];
   let ended = 0;
@@ -49,12 +52,13 @@ function rig() {
     },
     send: (m) => void out.push(m),
     onEnd: () => void (ended += 1),
+    resumeTimeoutMs,
   });
   return { relay, sockets, out, ended: () => ended };
 }
 
-function ready() {
-  const r = rig();
+function ready(resumeTimeoutMs?: number) {
+  const r = rig(resumeTimeoutMs);
   r.relay.start();
   r.sockets[0]?.open();
   r.sockets[0]?.push({ setupComplete: {} });
@@ -149,6 +153,45 @@ describe("VoiceRelay", () => {
     expect(r.sockets[0]?.closed).toBe(true);
     expect(r.out).toEqual([{ t: "ready" }]);
     expect(r.ended()).toBe(1);
+  });
+
+  test("the retiring socket erroring mid-handshake does not take the replacement down either", () => {
+    const r = ready();
+    r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });
+    r.sockets[0]?.push({ goAway: { timeLeft: { seconds: 20 } } });
+    r.sockets[0]?.fail();
+    expect(r.ended()).toBe(0);
+    r.sockets[1]?.open();
+    r.sockets[1]?.push({ setupComplete: {} });
+    r.relay.onClientMessage({ t: "audio", data: "AAA=" });
+    expect(r.sockets[1]?.frames().at(-1)).toHaveProperty("realtimeInput.audio.data", "AAA=");
+  });
+
+  test("a replacement that never comes up is abandoned after its deadline, and the session ends once nothing is left", async () => {
+    const r = ready(5);
+    r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });
+    r.sockets[0]?.push({ goAway: { timeLeft: { seconds: 20 } } });
+    r.sockets[0]?.drop();
+    expect(r.ended()).toBe(0);
+    // Each stalled replacement times out and is retried; the budget runs out and the dead socket
+    // can no longer be hidden behind a live-looking session.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(r.sockets.length).toBe(4);
+    expect(r.sockets.slice(1).every((s) => s.closed)).toBe(true);
+    expect(r.out.at(-2)).toEqual({ t: "error", code: "voice.upstream_closed" });
+    expect(r.ended()).toBe(1);
+  });
+
+  test("a repeated GoAway after the budget is spent does not open another replacement", () => {
+    const r = ready();
+    r.sockets[0]?.push({ sessionResumptionUpdate: { newHandle: "h9", resumable: true } });
+    r.sockets[0]?.push({ goAway: { timeLeft: { seconds: 20 } } });
+    r.sockets[1]?.drop();
+    r.sockets[2]?.drop();
+    r.sockets[3]?.drop();
+    expect(r.sockets).toHaveLength(4);
+    r.sockets[0]?.push({ goAway: { timeLeft: { seconds: 10 } } });
+    expect(r.sockets).toHaveLength(4);
   });
 
   test("a malformed message after ready ends the session with bad_message", () => {

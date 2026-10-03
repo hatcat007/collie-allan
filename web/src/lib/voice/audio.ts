@@ -69,6 +69,9 @@ export function createVoiceAudio(): VoiceAudio {
       }
     }
     nextStart = 0;
+    // A byte the decoder was holding for the next chunk belongs to audio that was just thrown away;
+    // left in, it would shift every sample of the next response by one byte and play as noise.
+    decode = createPcm16Decoder();
   };
 
   return {

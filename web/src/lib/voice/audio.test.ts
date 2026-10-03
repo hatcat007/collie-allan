@@ -176,6 +176,29 @@ describe("createVoiceAudio capture teardown", () => {
     expect(tracks.stopped).toBe(1);
   });
 
+  test("an interruption drops the decoder's held byte, so the next response is not shifted", () => {
+    const sources: number[][] = [];
+    vi.stubGlobal("AudioContext", class {
+      currentTime = 0;
+      state = "running";
+      destination = {};
+      resume() { return Promise.resolve(); }
+      close() { return Promise.resolve(); }
+      createBuffer(_c: number, length: number) {
+        return { duration: 0, copyToChannel: (data: Float32Array) => void sources.push([...data]), length };
+      }
+      createBufferSource() {
+        return { buffer: null, connect: () => {}, start: () => {}, stop: () => {}, addEventListener: () => {} };
+      }
+    });
+    const audio = createVoiceAudio();
+    const b64 = (bytes: number[]) => btoa(String.fromCharCode(...bytes));
+    audio.play(b64([1, 0, 2])); // ends mid-sample: one byte held
+    audio.flush();
+    audio.play(b64([3, 0])); // a new response: must decode as 3, not as (2 | 3<<8)
+    expect(sources.at(-1)).toEqual([3 / 0x8000]);
+  });
+
   test("prime unlocks the speaker inside the gesture and is a no-op after close", () => {
     const audio = createVoiceAudio();
     audio.prime();
