@@ -1,0 +1,391 @@
+import type { JsonObject, JsonValue } from "../json.ts";
+import { jsonRecord, jsonStringField } from "../stt/json.ts";
+import type { VoiceSettings } from "./config.ts";
+import {
+  buildAudioFrame,
+  buildAudioStreamEnd,
+  buildSetup,
+  buildToolResponse,
+  geminiLiveUrl,
+  type LiveEvent,
+  parseServerFrame,
+} from "./protocol.ts";
+import { isVoiceMode, isVoiceToolName, type VoiceMode } from "./tools.ts";
+
+// ── ONE VOICE SESSION: PHONE SOCKET ON ONE SIDE, GEMINI LIVE ON THE OTHER ───────────────────
+//
+// A relay and nothing more. Audio goes up as it arrived and comes back as it came; a tool call is
+// handed to the phone and the phone's answer is handed back. The bridge never executes a tool,
+// never writes to a pane, and never reads a screen on the model's behalf — those are the phone's
+// acts, through the reply guard (see tools.ts). That is what lets `/api/voice` be one gated socket
+// with no new write route behind it.
+//
+// Nothing here knows about `Bun.serve`: the upstream socket is injected, and the phone is a `send`
+// callback, so `bun test` drives the whole lifecycle with fakes.
+
+/** What an upstream socket reports. One handler each; the relay replaces them, never stacks them. */
+export interface UpstreamHandlers {
+  open(): void;
+  /** One complete text frame, already decoded (`upstream.ts` owns text-vs-binary). */
+  message(text: string): void;
+  close(): void;
+  error(): void;
+}
+
+/** The subset of a socket the relay uses. `upstream.ts` adapts a real `WebSocket` to it. */
+export interface UpstreamSocket {
+  send(data: string): void;
+  close(code?: number, reason?: string): void;
+  /** Register the handlers. Called once, straight after the factory returns. */
+  attach(handlers: UpstreamHandlers): void;
+  /** Stop calling the handlers; a retired socket's late events mean nothing. */
+  detach(): void;
+}
+
+export type UpstreamFactory = (url: string) => UpstreamSocket;
+
+/** Largest base64 audio chunk accepted from the phone (~96 KB of PCM, a few seconds). */
+export const MAX_AUDIO_CHUNK_CHARS = 128 * 1024;
+/** Largest tool result accepted from the phone, serialised. A pane screen is far below this. */
+export const MAX_TOOL_RESULT_CHARS = 64 * 1024;
+/** Replacement connections tried after a GoAway before the retiring socket is left to run out. */
+export const MAX_RESUME_ATTEMPTS = 2;
+/** A replacement that has not come up by now is a failed one, not a slow one. */
+export const DEFAULT_RESUME_TIMEOUT_MS = 10_000;
+
+const STREAM_END = JSON.stringify(buildAudioStreamEnd());
+
+/** Audio frames kept for a replacement still in setup: about this many 128 ms blocks, no more. */
+const MAX_HELD_FRAMES = 64;
+/** A session is cut here whatever else happens: an open microphone is not a standing service. */
+export const MAX_SESSION_MS = 60 * 60 * 1000;
+
+/** What the phone is sent. `error` carries a code the phone translates, never an upstream body. */
+export type VoiceClientMessage =
+  | { t: "ready" }
+  | { t: "audio"; data: string }
+  | { t: "interrupted" }
+  | { t: "turn_complete" }
+  | { t: "in_text"; text: string }
+  | { t: "out_text"; text: string }
+  | { t: "tool_call"; id: string; name: string; args: JsonObject }
+  | { t: "tool_cancelled"; ids: string[] }
+  | { t: "error"; code: VoiceErrorCode }
+  | { t: "closed" };
+
+export type VoiceErrorCode =
+  | "voice.upstream_unavailable"
+  | "voice.upstream_closed"
+  | "voice.bad_message"
+  | "voice.too_long";
+
+export interface VoiceRelayOptions {
+  settings: VoiceSettings;
+  open: UpstreamFactory;
+  /** Deliver one message to the phone. May throw if the phone is gone; the relay then closes. */
+  send: (message: VoiceClientMessage) => void;
+  /** Called exactly once when the session is over, for any reason. */
+  onEnd: () => void;
+  /** How long a replacement socket may take to come up before it counts as failed. */
+  resumeTimeoutMs?: number;
+}
+
+export class VoiceRelay {
+  private upstream: UpstreamSocket | null = null;
+  private pending: UpstreamSocket | null = null;
+  private handle: string | undefined;
+  private started = false;
+  private mode: VoiceMode = "agent";
+  private resumeAttempts = 0;
+  /** A GoAway arrived before there was a handle to resume by; the replacement opens when one does. */
+  private goAwayWaiting = false;
+  /** Epoch ms by which Gemini said it will drop the retiring socket, or null when it gave no time. */
+  private goAwayAt: number | null = null;
+  private pendingTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The retiring socket closed while its replacement was still coming up. */
+  private retiredGone = false;
+  /** Frames the phone sent while the only live socket was still being replaced. */
+  private held: { text: string; audio: boolean }[] = [];
+  private ended = false;
+  private ready = false;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  /** Tool call ids the model is awaiting; a response for any other id is not sent upstream. */
+  private readonly awaiting = new Map<string, string>();
+
+  constructor(private readonly opts: VoiceRelayOptions) {}
+
+  /** Open the upstream session. Idempotent: a second `start` is ignored. */
+  start(mode: VoiceMode = "agent"): void {
+    if (this.started || this.ended) return;
+    this.started = true;
+    this.mode = mode;
+    this.timer = setTimeout(() => this.fail("voice.too_long"), MAX_SESSION_MS);
+    this.connect(false);
+  }
+
+  /** One decoded JSON message from the phone. */
+  onClientMessage(raw: JsonValue): void {
+    if (this.ended) return;
+    const o = jsonRecord(raw);
+    const t = jsonStringField(o?.t);
+    if (o === null || t === null) return this.fail("voice.bad_message");
+    if (t === "start") {
+      // ABSENT means the default; a present mode that is not a known string (null, a number) is
+      // refused, never quietly upgraded to the more capable `agent` session.
+      const named = o.mode === undefined ? "agent" : jsonStringField(o.mode);
+      if (named === null || !isVoiceMode(named)) return this.fail("voice.bad_message");
+      return this.start(named);
+    }
+    if (!this.ready) return;
+    if (t === "audio") {
+      const data = jsonStringField(o.data);
+      if (data === null || data.length > MAX_AUDIO_CHUNK_CHARS) return this.fail("voice.bad_message");
+      this.sendUpstream(JSON.stringify(buildAudioFrame(data)), true);
+    } else if (t === "end") {
+      this.sendUpstream(STREAM_END, false);
+    } else if (t === "tool_result") {
+      this.onToolResult(o);
+    } else {
+      this.fail("voice.bad_message");
+    }
+  }
+
+  /**
+   * Send to the live upstream, or hold the frame while the retiring socket is gone and its replacement
+   * is still in setup, so the gap loses nothing the replacement can still take. Tool results and the
+   * stream end are never dropped; audio is, oldest first, past `MAX_HELD_FRAMES`.
+   */
+  private sendUpstream(text: string, audio: boolean): void {
+    if (this.retiredGone && this.pending !== null) {
+      // Bounded without a cap of its own: audio is trimmed below, a tool result is held once per
+      // awaited call id (`onToolResult` deletes the id as it sends), and consecutive stream ends say it once. A mute, speech, mute keeps both ends, because the second closes the speech between.
+      if (!audio && text === STREAM_END && this.held.at(-1)?.text === STREAM_END) return;
+      this.held.push({ text, audio });
+      let audioHeld = this.held.filter((f) => f.audio).length;
+      while (audioHeld > MAX_HELD_FRAMES) {
+        const oldest = this.held.findIndex((f) => f.audio);
+        this.held.splice(oldest, 1);
+        audioHeld -= 1;
+      }
+      // Trimming audio can leave two ends side by side: they say it once.
+      this.held = this.held.filter((f, i) => !(f.text === STREAM_END && this.held[i - 1]?.text === STREAM_END));
+      return;
+    }
+    this.upstream?.send(text);
+  }
+
+  /** The phone's socket closed. */
+  onClientClosed(): void {
+    this.end(false);
+  }
+
+  private onToolResult(o: JsonObject): void {
+    const id = jsonStringField(o.id);
+    const response = jsonRecord(o.response);
+    if (id === null || response === null) return this.fail("voice.bad_message");
+    const name = this.awaiting.get(id);
+    // A result for a call nobody made is the phone talking past the model; drop it.
+    if (name === undefined) return;
+    if (JSON.stringify(response).length > MAX_TOOL_RESULT_CHARS) return this.fail("voice.bad_message");
+    this.awaiting.delete(id);
+    this.sendUpstream(JSON.stringify(buildToolResponse(id, name, response)), false);
+  }
+
+  private connect(resuming: boolean): void {
+    const socket = this.opts.open(geminiLiveUrl(this.opts.settings.apiKey));
+    if (resuming) {
+      this.pending = socket;
+      // A replacement that neither opens nor errors must not leave the session parked on a closing
+      // socket with the phone still talking into it: give it a deadline, then treat it as failed.
+      clearTimeout(this.pendingTimer);
+      this.pendingTimer = setTimeout(() => {
+        if (this.pending !== socket || this.ended) return;
+        socket.detach();
+        socket.close(1000, "timeout");
+        this.replacementFailed();
+      }, this.opts.resumeTimeoutMs ?? DEFAULT_RESUME_TIMEOUT_MS);
+    } else {
+      this.upstream = socket;
+    }
+    socket.attach({
+      open: () => {
+        socket.send(JSON.stringify(buildSetup(this.opts.settings, this.mode, this.handle)));
+      },
+      message: (text) => {
+        let frame: JsonValue;
+        try {
+          // SAFETY: `JSON.parse` answers with a JSON value and `parseServerFrame` is its only reader.
+          frame = JSON.parse(text) as JsonValue;
+        } catch {
+          return;
+        }
+        for (const event of parseServerFrame(frame)) this.onEvent(socket, event);
+      },
+      error: () => {
+        if (socket === this.pending) return this.replacementFailed();
+        if (socket !== this.upstream || this.ended) return;
+        // Same rule as a close: the retiring socket failing while its replacement comes up is not
+        // the end of the conversation, only of that socket.
+        if (this.pending !== null) {
+          this.retiredGone = true;
+          return;
+        }
+        this.fail("voice.upstream_unavailable");
+      },
+      close: () => {
+        if (socket === this.pending) return this.replacementFailed();
+        if (socket !== this.upstream || this.ended) return;
+        // The retiring socket closing while its replacement is mid-handshake is the plan working,
+        // not a failure: leave the replacement to come up, and fail only if it cannot.
+        if (this.pending !== null) {
+          this.retiredGone = true;
+          return;
+        }
+        this.fail("voice.upstream_closed");
+      },
+    });
+  }
+
+  private onEvent(from: UpstreamSocket, event: LiveEvent): void {
+    // A frame from the socket being retired is still real until the swap, but a frame from the
+    // replacement before it is ready is not forwarded.
+    if (event.kind === "setup_complete") {
+      if (from === this.pending) {
+        const old = this.upstream;
+        clearTimeout(this.pendingTimer);
+        this.upstream = this.pending;
+        this.pending = null;
+        this.resumeAttempts = 0;
+        this.goAwayAt = null;
+        this.retiredGone = false;
+        const held = this.held;
+        this.held = [];
+        for (const frame of held) this.upstream?.send(frame.text);
+        if (old !== null) {
+          old.detach();
+          old.close(1000, "resumed");
+        }
+      }
+      if (!this.ready) {
+        this.ready = true;
+        this.deliver({ t: "ready" });
+      }
+      return;
+    }
+    if (from === this.pending) return;
+    switch (event.kind) {
+      case "audio":
+        return this.deliver({ t: "audio", data: event.base64 });
+      case "interrupted":
+        return this.deliver({ t: "interrupted" });
+      case "turn_complete":
+        return this.deliver({ t: "turn_complete" });
+      case "input_text":
+        return this.deliver({ t: "in_text", text: event.text });
+      case "output_text":
+        return this.deliver({ t: "out_text", text: event.text });
+      case "resumption":
+        this.handle = event.handle;
+        // A GoAway that beat the first handle: resume now that there is one.
+        if (this.goAwayWaiting && this.pending === null) this.beginResume();
+        return;
+      case "go_away":
+        this.goAwayAt = event.seconds === null ? null : Date.now() + event.seconds * 1000;
+        // Reconnect ahead of the deadline, resuming by handle; the swap happens on setup_complete.
+        // No handle yet: remember the GoAway and open the replacement when one arrives.
+        if (this.handle === undefined) this.goAwayWaiting = true;
+        else if (this.pending === null && this.resumeAttempts < MAX_RESUME_ATTEMPTS) this.beginResume();
+        return;
+      case "tool_cancelled":
+        for (const id of event.ids) this.awaiting.delete(id);
+        return this.deliver({ t: "tool_cancelled", ids: event.ids });
+      case "tool_call":
+        // A name the bridge never declared is the model hallucinating; it is refused upstream with
+        // an error result and the phone never hears of it.
+        if (!isVoiceToolName(event.call.name)) {
+          this.sendUpstream(
+            JSON.stringify(buildToolResponse(event.call.id, event.call.name, { error: "unknown tool" })),
+            false,
+          );
+          return;
+        }
+        this.awaiting.set(event.call.id, event.call.name);
+        return this.deliver({ t: "tool_call", id: event.call.id, name: event.call.name, args: event.call.args });
+    }
+  }
+
+  /**
+   * The replacement opened for a GoAway failed before it came up. The conversation is still on the
+   * retiring socket, so try again while the handle is good; once the attempts are spent the old
+   * socket is left to close, which ends the session with its own code and tells the phone.
+   */
+  private replacementFailed(): void {
+    clearTimeout(this.pendingTimer);
+    // A failed replacement is cut loose before another is tried: left attached it could still
+    // deliver queued frames, and `pending` no longer names it, so they would pass as the live session's.
+    const failed = this.pending;
+    this.pending = null;
+    if (failed !== null) {
+      failed.detach();
+      failed.close(1000, "failed");
+    }
+    if (this.ended) return;
+    if (
+      this.handle !== undefined &&
+      this.resumeAttempts < MAX_RESUME_ATTEMPTS &&
+      // A replacement already in flight keeps its full setup window; only a NEW attempt waits on the
+      // GoAway, because one opened after the old socket is gone has nothing to take over from.
+      (this.goAwayAt === null || Date.now() < this.goAwayAt)
+    ) {
+      this.resumeAttempts += 1;
+      this.connect(true);
+      return;
+    }
+    // No more attempts. If the old socket has already gone, there is nothing left to run on.
+    if (this.retiredGone) this.fail("voice.upstream_closed");
+  }
+
+  private beginResume(): void {
+    this.goAwayWaiting = false;
+    this.connect(true);
+  }
+
+  private deliver(message: VoiceClientMessage): void {
+    if (this.ended) return;
+    try {
+      this.opts.send(message);
+    } catch {
+      this.end(false);
+    }
+  }
+
+  private fail(code: VoiceErrorCode): void {
+    if (this.ended) return;
+    this.deliver({ t: "error", code });
+    this.end(true);
+  }
+
+  private end(notify: boolean): void {
+    if (this.ended) return;
+    this.ended = true;
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    clearTimeout(this.pendingTimer);
+    for (const socket of [this.upstream, this.pending]) {
+      if (socket === null) continue;
+      socket.detach();
+      socket.close(1000, "done");
+    }
+    this.upstream = null;
+    this.pending = null;
+    this.awaiting.clear();
+    this.held = [];
+    if (notify) {
+      try {
+        this.opts.send({ t: "closed" });
+      } catch {
+        // the phone is already gone; nothing to tell it
+      }
+    }
+    this.opts.onEnd();
+  }
+}

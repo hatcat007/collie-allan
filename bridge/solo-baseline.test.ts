@@ -688,6 +688,12 @@ describe("solo zero-tax — routes", () => {
       // The digest's "remind me next digest" dismiss — solo, no crew sibling: it writes the lead's
       // own notify record, and a peer never pushes an update notification of its own.
       "/api/update/snooze",
+      // Voice mode (bridge/voice/) — a SOLO feature that legitimately extends this list, named here
+      // rather than exempted, exactly as speech-to-text is. The ticket route is write-gated and the
+      // socket spends its one-use ticket; both answer 503 until `collie voice setup`, and neither
+      // registers a crew route.
+      "/api/voice",
+      "/api/voice/ticket",
       "/api/workspace",
       "/auth",
       "/auth/*",
@@ -930,6 +936,9 @@ const STATE_DIR_ENTRIES = [
   "update.json",
   "update.lock",
   "uploads",
+  // Voice-mode settings. Absent until the operator runs `collie voice setup`, and READ ONLY by the
+  // bridge — `bridge/voice/config.ts` names this path and never writes it.
+  "voice.json",
 ];
 
 /**

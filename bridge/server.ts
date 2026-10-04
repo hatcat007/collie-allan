@@ -72,6 +72,10 @@ import type { CrewHandler, CrewSurface } from "./crew/router.ts";
 import type { CrewTlsOptions } from "./crew/transport.ts";
 import { createSttAdmission, MAX_STT_AUDIO_BYTES, sttCapability, transcribeRequest } from "./stt/http.ts";
 import type { SttProvider } from "./stt/provider.ts";
+import type { VoiceSettings } from "./voice/config.ts";
+import { createVoiceAdmission, spentTicketAdmitted, spentTicketBound, voiceCapability } from "./voice/http.ts";
+import { createVoiceWebsocket, type VoiceSocketData } from "./voice/socket.ts";
+import { createTicketStore } from "./voice/ticket.ts";
 import { uploadTooLarge } from "./uploads.ts";
 import { MUX_LOGO_PATH, OPERATOR_FONTS_PATH, journalAgentOf, toPaneWire } from "./types.ts";
 import type {
@@ -110,6 +114,7 @@ import type {
   PaneWire,
   SnapshotResponse,
   SttCapability,
+  VoiceCapability,
   UpdateStatus,
   UploadCapability,
   UploadResponse,
@@ -165,6 +170,10 @@ const CONTENT_TYPES = new Map<string, string>([
   [".svg", "image/svg+xml"],
   [".ico", "image/x-icon"],
   [".woff2", "font/woff2"],
+  // Voice mode's Persona avatar (ADR 0081): a Rive runtime WASM and its `.riv` scenes, same-origin.
+  // A wasm response must carry its own type or the browser refuses to stream-compile it.
+  [".wasm", "application/wasm"],
+  [".riv", "application/octet-stream"],
 ]);
 
 // Strict CSP. Scripts are external, hashed bundles (script-src 'self'); pane text is rendered by
@@ -172,9 +181,13 @@ const CONTENT_TYPES = new Map<string, string>([
 // for styles only (the toast library injects a <style> tag) — it can't execute code. `blob:` in
 // img-src is the composer's attachment thumbnail (ADR 0060): a blob URL is minted only by this
 // page's own script, from a file the operator picked, so it admits no new origin.
+// `'wasm-unsafe-eval'` is the one addition voice mode costs (ADR 0081): the Persona avatar's Rive
+// runtime is WebAssembly, and a browser refuses to compile any module without it. It permits WASM
+// the page already loaded from `'self'`; it does not permit `eval` or `new Function`, so a string
+// still cannot become script.
 const CSP =
   "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; " +
-  "style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self'; " +
+  "style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; " +
   "manifest-src 'self'; base-uri 'none'; frame-ancestors 'none'";
 
 // Hardening headers set on EVERY response (static + API), applied centrally in the fetch wrapper.
@@ -575,6 +588,8 @@ export function bridgeConfigBody(opts: {
    * configured none ships the same payload as before, the same rule `mode` follows.
    */
   stt?: SttCapability;
+  /** Voice mode, when a key resolved. Omitted otherwise, for the reason `stt` is. */
+  voice?: VoiceCapability;
   /**
    * What this host accepts as an attachment. Optional here for the reason `mux` is — the crew-mode
    * assertions build this body by hand and are about the crew — and always passed by the real
@@ -608,6 +623,7 @@ export function bridgeConfigBody(opts: {
   // Appended after the mux block, and omit-when-absent for the reason `mode` is: no key means no
   // microphone, which is precisely true of a collie with no provider configured.
   if (opts.stt !== undefined) wire.stt = opts.stt;
+  if (opts.voice !== undefined) wire.voice = opts.voice;
   // Same omit-when-absent rule, and the same reading on the other end: no key is an older bridge,
   // which the phone falls back to the pre-attachment contract for (images, 10 MB).
   if (opts.upload !== undefined) wire.upload = opts.upload;
@@ -758,6 +774,11 @@ export function startServer(opts: {
    */
   stt?: () => Promise<SttProvider | null>;
   /**
+   * Voice mode settings, asked for per request (`bridge/voice/config.ts`, re-read behind an mtime
+   * check) so `collie voice setup` goes live without a restart. `null` is the feature being off.
+   */
+  voice?: () => Promise<VoiceSettings | null>;
+  /**
    * The journal registry, built once by the caller. Absent means this function builds its own, which
    * is what every test does; `bridge/index.ts` passes one so the cache tracker and the history route
    * share the adapters' memoised path caches.
@@ -796,6 +817,9 @@ export function startServer(opts: {
   const pairing = opts.pairing;
   const folders = opts.folders;
   const stt = opts.stt ?? (async () => null);
+  const voice = opts.voice ?? (async () => null);
+  const voiceTickets = createTicketStore();
+  const voiceAdmission = createVoiceAdmission();
   // One gate per Bun server, not per request: two slow uploads and their two provider calls share
   // the same bounded process-local capacity (bridge/stt/http.ts).
   const sttAdmission = createSttAdmission();
@@ -1327,8 +1351,9 @@ export function startServer(opts: {
     return tail === null ? status : { ...status, run: { ...run, logTail: tail } };
   }
 
-  const server = Bun.serve({
+  const server = Bun.serve<VoiceSocketData>({
     hostname: cfg.host,
+    websocket: createVoiceWebsocket(),
     port: cfg.port,
     // Runtime cap on any request body — a chunked/lying client is cut off here even if its
     // Content-Length is absent or false. The upload handler still does its own precise check.
@@ -1337,7 +1362,7 @@ export function startServer(opts: {
     // certificate never reaches `fetch` at all, so nothing below has to defend against it.
     tls: listenerTls,
 
-    async fetch(req) {
+    async fetch(req, srv) {
       const url = new URL(req.url);
       // A mounted collie (`COLLIE_BASE_PATH`, ADR 0052) is normally reached through a proxy that
       // strips the mount before it forwards — `tailscale serve` does, `http.StripPrefix` on the
@@ -1631,6 +1656,7 @@ export function startServer(opts: {
         // live, and this is where the phone learns whether to draw a microphone at all. `?? undefined`
         // because "no provider" must OMIT the key, never send a null one (CREW_PROTOCOL.md §11).
         const sttWire = (await sttCapability(await stt())) ?? undefined;
+        const voiceWire = voiceCapability(await voice()) ?? undefined;
         return json(
           bridgeConfigBody({
             push: push.enabled,
@@ -1646,6 +1672,7 @@ export function startServer(opts: {
             // builds the byte-identical body it always did (CREW_PROTOCOL.md §11).
             muxWire: memberMux ?? undefined,
             stt: sttWire,
+            voice: voiceWire,
             // This host's own limits, read from cfg on every request like everything else here.
             // A crew member answers with ITS number, which is the number that will judge the bytes.
             upload: {
@@ -2074,6 +2101,58 @@ export function startServer(opts: {
         // provider's own words never reach the audit log.
         audit.record({ action: "stt", device: whois(req).device, detail: { ...attempt } });
         return secure(response);
+      }
+
+      // ── Voice mode (bridge/voice/) ───────────────────────────────────────
+      if (pathname === "/api/voice/ticket" && req.method === "POST") {
+        // WRITE-gated: a spoken session can type into a terminal through the phone, so opening one
+        // asks for exactly what typing asks for. The ticket is how that proof reaches a WebSocket,
+        // which cannot carry the pairing bearer header (bridge/voice/ticket.ts).
+        const denied = guard(req, cfg, "write", pairing);
+        if (denied) return denied;
+        if ((await voice()) === null) {
+          return jsonError(apiError("voice.unconfigured"), 503, req.headers.get("accept-encoding"));
+        }
+        const ticket = voiceTickets.mint(
+          whois(req).device ?? "",
+          bearerToken(req.headers),
+          deviceAuth(req, cfg).device ?? null,
+        );
+        if (ticket === null) return jsonError(apiError("voice.busy"), 429, req.headers.get("accept-encoding"));
+        return json({ ticket }, req.headers.get("accept-encoding"));
+      }
+      if (pathname === "/api/voice" && req.method === "GET") {
+        // Read-level for the host/origin checks; the write proof is the ticket the upgrade spends.
+        const denied = guard(req, cfg, "read", pairing);
+        if (denied) return denied;
+        const settings = await voice();
+        if (settings === null) return text("voice mode is not configured", 503);
+        const spent = voiceTickets.consume(url.searchParams.get("ticket") ?? "");
+        if (spent === null) return text("bad ticket", 403);
+        // The write gate ran when the ticket was minted; run its two questions again now, so a
+        // device revoked or de-listed inside the ticket's 30 seconds cannot still open a session.
+        const upgradeAuth = deviceAuth(req, cfg);
+        if (!upgradeAuth.authorized) return text("device not authorised", 403);
+        // The ticket is bound to the identity the proxy asserted at mint: lifted off one device, it
+        // does not open a session from another.
+        if (!spentTicketBound(spent, upgradeAuth.device ?? null)) return text("ticket belongs to another device", 403);
+        if (!spentTicketAdmitted(spent, pairing)) return text("device not paired", 403);
+        const { device } = spent;
+        const release = voiceAdmission.acquire();
+        if (release === null) return text("a voice session is already open", 429);
+        const data: VoiceSocketData = {
+          settings,
+          device,
+          release,
+          onEnd: (ms) =>
+            audit.record({ action: "voice.end", device, detail: { model: settings.model, ms } }),
+        };
+        if (!srv.upgrade(req, { data })) {
+          release();
+          return text("websocket upgrade required", 426);
+        }
+        audit.record({ action: "voice.start", device, detail: { model: settings.model } });
+        return undefined;
       }
 
       // ── Device pairing (bridge/pairing.ts) ───────────────────────────────

@@ -61,6 +61,8 @@ import { StripsSummary } from "@/components/strips-summary";
 import { PaneMeta } from "@/components/pane-meta";
 import { CacheSheet } from "@/components/cache-sheet";
 import { PaneActionsSheet } from "@/components/pane-actions-sheet";
+import { VoiceSheet } from "@/components/voice-sheet";
+import { useVoiceCapability } from "@/lib/voice/capability";
 import { CardWaitingCtx } from "@/components/chat-cards";
 import { SessionStream } from "@/components/session-stream";
 import { PaneSettingsSheet } from "@/components/pane-settings-sheet";
@@ -158,7 +160,7 @@ function foldLabelKey(tabCount: number, paneCount: number): MessageKey {
 
 // At most one drawer/sheet is open at a time; null = none. (The composer's own Keys/Quick/Agent
 // sheets are separate and live inside <Composer>.)
-type Drawer = "switcher" | "paneMenu" | "paneSettings" | "display" | null;
+type Drawer = "switcher" | "paneMenu" | "paneSettings" | "display" | "voice" | null;
 
 /**
  * Is the caret in the MESSAGE COMPOSER's field, as opposed to any other input on the screen?
@@ -453,6 +455,7 @@ export function AgentChat({
   }, [landscape, zen, autoZenActive]);
   const listRef = useRef<ChatMessageListHandle>(null);
   const composerRef = useRef<ComposerHandle>(null);
+  const voiceOffered = useVoiceCapability() !== null;
   // The box the composer's terminal-draft notice floats in (ADR 0061), at the mirror's bottom edge.
   // State rather than a ref: the composer portals into it, so it must re-render once it exists.
   const [draftNoticeSlot, setDraftNoticeSlot] = useState<HTMLDivElement | null>(null);
@@ -2577,6 +2580,9 @@ export function AgentChat({
           // already spent. It hands over to the sheet below in one React event, so the actions sheet
           // unmounts in the same commit the settings sheet mounts.
           onSettings={() => setDrawer("paneSettings")}
+          // Voice mode (ADR 0081). Offered only when the bridge published a key, this browser can
+          // capture audio, and the pane can take a reply at all; absence is the gate.
+          onVoice={voiceOffered && !gone && !readOnly ? () => setDrawer("voice") : undefined}
           // THE BODY SWITCH. `undefined` while Settings → Experiments has Chat off, which is what
           // keeps the row off the sheet entirely; `chatNote` is why this pane keeps the terminal
           // when it does. One standing per-device value, written here and nowhere else.
@@ -2590,6 +2596,32 @@ export function AgentChat({
         {/* This pane's own settings — one switch today, the prompt-cache warning (ADR 0042). Scoped to
             the PANE's machine, because `?host=` there names where the pane lives; the preference itself
             lands on the collie this phone is talking to, which is the only one that can push. */}
+        {voiceOffered && (
+          <VoiceSheet
+            open={drawer === "voice"}
+            onClose={closeDrawer}
+            paneKey={`${scope?.host ?? ""}\0${scope?.session ?? ""}\0${paneId}`}
+            host={{
+              // Words, not the mirror's colour escapes: they would spend the model's character budget
+              // and a tail cut could land inside one. `logicalText` has no hard wraps. Read from the
+              // frozen snapshot like every other read here, so the model judges what the operator is
+              // LOOKING AT, never rows that arrived after they scrolled up.
+              readPane: () =>
+                parseAnsi(shown.logicalText || shown.text)
+                  .map((segment) => segment.text)
+                  .join(""),
+              getDraft: () => composerRef.current?.getDraft() ?? "",
+              // Asked when a tool runs, so the composer's own live refusal state decides a send.
+              isLocked: () => composerRef.current?.isLocked() ?? true,
+              setDraft: (draft) => composerRef.current?.setDraft(draft),
+              send: async (reply) => (await composerRef.current?.sendText(reply)) === true,
+              pressKey: async (key) => (await composerRef.current?.pressKey(key)) === true,
+              // The composer refuses a send it cannot take, and the sheet reads that as blocked; this
+              // only tells the sheet to say so up front.
+              locked: gone || readOnly || hostBlock !== undefined,
+            }}
+          />
+        )}
         <PaneSettingsSheet
           open={drawer === "paneSettings"}
           onClose={closeDrawer}

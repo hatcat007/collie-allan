@@ -441,6 +441,25 @@ describe("PaneActionsSheet — pin", () => {
     expect(pin.compareDocumentPosition(rename) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("offers Voice mode only when handed a way to open it, and a tap closes the sheet first", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<PaneActionsSheet {...renderProps()} />);
+    expect(screen.queryByRole("button", { name: /Voice mode/ })).toBeNull();
+    unmount();
+    const onClose = vi.fn();
+    const onVoice = vi.fn();
+    render(<PaneActionsSheet {...renderProps({ onClose, onVoice })} />);
+    await user.click(screen.getByRole("button", { name: /Voice mode/ }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onVoice).toHaveBeenCalledTimes(1);
+    expect(onClose.mock.invocationCallOrder[0]).toBeLessThan(onVoice.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it("withholds Voice mode on a read-only device, where it could never send", () => {
+    render(<PaneActionsSheet {...renderProps({ onVoice: vi.fn(), readOnly: true })} />);
+    expect(screen.queryByRole("button", { name: /Voice mode/ })).toBeNull();
+  });
+
   it("pins, closes the sheet first, and hands the caller the new state", async () => {
     const user = userEvent.setup();
     const onPinChange = vi.fn();
@@ -499,6 +518,21 @@ describe("PaneActionsSheet — pin", () => {
     expect(screen.getByText(/workshop is unreachable/i)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Pin to top" }));
     expect(pinMatcher(currentPins())(quiet)).toBe(true);
+  });
+
+  it("withholds Voice mode on a pane whose machine is unreachable", () => {
+    const roster: ServerSummary[] = [
+      { id: "bluefin", name: "bluefin", isLead: true, reachable: true, protocol: "ok", lastSeenAt: 9_000 },
+      { id: "workshop", name: "workshop", isLead: false, reachable: false, protocol: "ok", lastSeenAt: 1_000 },
+    ];
+    render(<PaneActionsSheet {...renderProps({ onVoice: vi.fn(), pane: { ...agent, host: "workshop" } })} />, {
+      wrapper: ({ children }) => (
+        <CrewProvider servers={roster} ts={20_000} pollMs={1500}>
+          {children}
+        </CrewProvider>
+      ),
+    });
+    expect(screen.queryByRole("button", { name: /Voice mode/ })).toBeNull();
   });
 
   it("drops the pin when Close succeeds", async () => {

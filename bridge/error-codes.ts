@@ -145,6 +145,10 @@ export const ERROR_CODES = {
   /** The provider itself failed. `detail.kind` is the SttError kind; the sentence is its own words. */
   "stt.provider_failed": "{reason}",
 
+  // ── Voice mode: POST /api/voice/ticket (bridge/voice/) ─────────────────────────────
+  "voice.unconfigured": "voice mode is not configured on this collie — run `collie voice setup`",
+  "voice.busy": "too many voice sessions were just started — try again in a moment",
+
   // ── Device pairing: POST /api/pair, POST /api/devices/revoke ───────────────────────
   //
   // These sentences look like codes because they ARE the machine-readable reasons pairing has always

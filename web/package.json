@@ -17,6 +17,8 @@
     "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
+    "@rive-app/react-webgl2": "^4.35.0",
+    "@rive-app/webgl2": "2.43.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.22.0",

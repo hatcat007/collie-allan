@@ -65,6 +65,19 @@ PATH. Details and rollback: [`docs/upgrading.md`](./docs/upgrading.md) → *Upgr
   Type mode, and the card updates after about a second. A row omp cut short and a model the
   conversation no longer fits (picking it compacts first) are left out. The `@` quick roles, the
   task-model picker, narrow panes and the Nerd Font symbols stay terminal text with an Escape button.
+- **`collie voice setup` turns on a Gemini Live voice relay in the bridge.** The bridge opens one
+  Gemini Live session per phone, holds the key in `voice.json` at mode 0600 and never sends it to the
+  phone, and relays audio and the model's tool calls over a one-use-ticket WebSocket at `/api/voice`.
+  Setup asks for the key at the prompt, or reads `COLLIE_VOICE_KEY`, and refuses unknown flags; ticket is bound to the device that minted it and refused if that device was revoked, and a GoAway resumes the session on a new socket. `collie voice test`, `status` and
+  `off` complete the verb. It is off until you run setup, and the default model is `gemini-3.8-live`.
+- **Voice mode on the phone: talk to an agent with the Persona avatar.** Open a pane's ⋮ menu and
+  tap Voice mode (it appears once `collie voice setup` has run). Agent mode is a Gemini Live
+  conversation that can read the pane, draft a reply, and ask to send text or press a key. Each
+  action waits for your tap. A text send follows the Send button's path, reply guard included. A key
+  press uses the composer's key path, which refuses while the composer is locked but does not verify
+  the screen. Dictate mode types what you say into the reply box and sends nothing. The Persona
+  avatar and its WebAssembly runtime are bundled and load only when the sheet opens, and the CSP
+  gains `'wasm-unsafe-eval'`.
 
 ### Changed
 

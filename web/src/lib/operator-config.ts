@@ -10,6 +10,7 @@ import type {
   OperatorQuickReplyRow,
   SttCapability,
   UploadCapability,
+  VoiceCapability,
 } from "@/lib/types";
 
 // The startup-resolved half of /api/config, read ONCE and held in module state: the operator's own
@@ -56,6 +57,8 @@ let currentMux: MuxConfig | null = null;
 // are the same value on purpose, because both mean "there is no microphone here" (ADR 0029). Absent
 // is the feature being off, so nothing has to distinguish them.
 let currentStt: SttCapability | null = null;
+// `null` until a read succeeds AND on every bridge with no Gemini key: both mean "no voice row".
+let currentVoice: VoiceCapability | null = null;
 // `null` until a read succeeds AND on every bridge older than the field. The two are the same value
 // on purpose: both mean "nothing said otherwise", and lib/attachments.ts answers both with the
 // contract that shipped before attachments existed — 10 MB, images only.
@@ -86,6 +89,7 @@ export function loadOperatorCommands(): Promise<void> {
       applyOperatorFonts(currentFonts, designPrefs().font);
       currentMux = cfg.mux ?? null;
       currentStt = cfg.stt ?? null;
+      currentVoice = cfg.voice ?? null;
       currentUpload = cfg.upload ?? null;
       loaded = true;
       emit();
@@ -191,6 +195,11 @@ export function getSttCapability(): SttCapability | null {
   return currentStt;
 }
 
+/** The voice-mode block, or `null` when nothing said otherwise. Consumers go through lib/voice/. */
+export function getVoiceCapability(): VoiceCapability | null {
+  return currentVoice;
+}
+
 /**
  * What this collie accepts as an attachment, or `null` when nothing has said otherwise (no read yet,
  * a failed read, or a bridge older than the field). Consumers go through lib/attachments.ts, which
@@ -288,6 +297,7 @@ export function __resetOperatorCommands(): void {
   currentFonts = [];
   currentMux = null;
   currentStt = null;
+  currentVoice = null;
   currentUpload = null;
   inflight = null;
   loaded = false;

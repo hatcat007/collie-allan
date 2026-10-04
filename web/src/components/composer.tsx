@@ -66,6 +66,18 @@ import { NoEchoNotice } from "@/components/no-echo-notice";
 export interface ComposerHandle {
   /** Focus the input and put the caret at the end — used by the mirror-tap-to-focus in AgentChat. */
   focusInput: () => void;
+  /**
+   * Voice mode's four reach-ins (ADR 0081). Every one is the composer's OWN path, never a second
+   * one: `sendText` is `send()` with its refusals, its pre-flight and the reply guard; `pressKey` is
+   * `pressKeys()`, which refuses when locked; the draft pair is `updateInput`, which persists.
+   */
+  getDraft: () => string;
+  setDraft: (text: string) => void;
+  /** True only on a VERIFIED send, exactly as the Send button reads it. */
+  sendText: (text: string) => Promise<boolean>;
+  pressKey: (key: string) => Promise<boolean>;
+  /** The composer cannot take a reply right now. */
+  isLocked: () => boolean;
 }
 
 interface ComposerProps {
@@ -709,7 +721,22 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const effectiveStable = suppressEcho(terminalDraft);
   const effectiveRaw = suppressEcho(rawTerminalDraft);
 
-  useImperativeHandle(ref, () => ({ focusInput: focusInputImmediately }), []);
+  // Re-pointed every render so the handle below, which is created once, always calls this render's
+  // closures: `send` and `pressKeys` read props and state that change on every poll.
+  const reachIn = useRef({ send, pressKeys, updateInput });
+  reachIn.current = { send, pressKeys, updateInput };
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusInput: focusInputImmediately,
+      getDraft: () => inputValueRef.current,
+      setDraft: (draft) => reachIn.current.updateInput(draft),
+      sendText: (reply) => reachIn.current.send(reply, false),
+      pressKey: (key) => reachIn.current.pressKeys([key]),
+      isLocked: () => lockedRef.current,
+    }),
+    [],
+  );
 
   useEffect(
     () => () => {
