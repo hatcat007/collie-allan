@@ -46,7 +46,11 @@ type RawSettings = ReturnType<typeof coerceVoiceFile>;
 
 const settingsPath = (deps: VoiceDeps): string => join(deps.ctx.stateDir, VOICE_FILENAME);
 
-function readFileSettings(deps: VoiceDeps, warn?: (message: string) => void): RawSettings {
+function readFileSettings(
+  deps: VoiceDeps,
+  warn?: (message: string) => void,
+  onHeld?: () => void,
+): RawSettings {
   const raw = deps.files.read(settingsPath(deps));
   if (raw === null) return coerceVoiceFile(undefined);
   try {
@@ -56,6 +60,7 @@ function readFileSettings(deps: VoiceDeps, warn?: (message: string) => void): Ra
     // or it reads as an absent file while the file is there.
     if (jsonRecord(parsed) === null) {
       warn?.(`${VOICE_FILENAME} is not a settings object`);
+      onHeld?.();
       return coerceVoiceFile(undefined);
     }
     return coerceVoiceFile(parsed, warn);
@@ -63,6 +68,7 @@ function readFileSettings(deps: VoiceDeps, warn?: (message: string) => void): Ra
     // The running bridge keeps its last good file on a parse failure, so "nothing configured" would
     // be untrue here: say the file is broken instead.
     warn?.(`${VOICE_FILENAME} could not be parsed`);
+    onHeld?.();
     return coerceVoiceFile(undefined);
   }
 }
@@ -223,10 +229,20 @@ export async function cmdVoiceTest(deps: VoiceDeps): Promise<number> {
   return EXIT.FAIL;
 }
 
+/** Only an unparseable file or a non-object root is held over by the bridge; a rejected one is re-read. */
+const KEEPS_LAST_GOOD = "  note      a running bridge keeps its last good settings until it restarts or the file is fixed";
+
 /** `collie voice status` — what is configured, and where each part came from. Never the key. */
 export function cmdVoiceStatus(deps: VoiceDeps): number {
   const warnings: string[] = [];
-  const file = readFileSettings(deps, (m) => warnings.push(m));
+  let fileUnreadable = false;
+  const file = readFileSettings(
+    deps,
+    (m) => warnings.push(m),
+    () => {
+      fileUnreadable = true;
+    },
+  );
   const env = voiceEnvSettings(deps.ctx.env);
   const settings = resolveVoiceSettings(file, env, (m) => warnings.push(m));
   const path = settingsPath(deps);
@@ -247,7 +263,7 @@ export function cmdVoiceStatus(deps: VoiceDeps): number {
     deps.io.out("voice mode: off — the configuration on this machine cannot be used.");
     for (const line of warnings) deps.io.err(`  ${line}`);
     deps.io.out(`  config    ${path}`);
-    deps.io.out("  note      a running bridge keeps its last good settings until it restarts or the file is fixed");
+    if (fileUnreadable) deps.io.out(KEEPS_LAST_GOOD);
     return EXIT.FAIL;
   }
   deps.io.out("voice mode: on");
@@ -260,9 +276,7 @@ export function cmdVoiceStatus(deps: VoiceDeps): number {
   // Voice is on through the environment, but the file beside it is broken: say so, because the
   // running bridge may still be reading the last good copy of it.
   for (const line of warnings) deps.io.err(`  warning: ${line}`);
-  if (warnings.length > 0) {
-    deps.io.out("  note      a running bridge keeps its last good settings until it restarts or the file is fixed");
-  }
+  if (fileUnreadable) deps.io.out(KEEPS_LAST_GOOD);
   return EXIT.OK;
 }
 

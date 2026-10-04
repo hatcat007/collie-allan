@@ -170,6 +170,12 @@ describe("voice status and off", () => {
     }
   });
 
+  test("status gives no keep-last-good note for a parseable file the bridge rejects", () => {
+    const d = deps({ seed: { [CONFIG_PATH]: JSON.stringify({ provider: "nope", apiKey: "AIza-x" }) } });
+    expect(cmdVoiceStatus(d)).toBe(EXIT.FAIL);
+    expect(said(d)).not.toContain("keeps its last good settings");
+  });
+
   test("status shows a broken voice.json even when the environment keeps voice on", () => {
     const d = deps({ seed: { [CONFIG_PATH]: "{not json" }, env: { [VOICE_ENV_KEYS.key]: "AIza-env" } });
     expect(cmdVoiceStatus(d)).toBe(EXIT.OK);
