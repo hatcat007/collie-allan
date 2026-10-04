@@ -155,6 +155,7 @@ describe("voice status and off", () => {
     const d = deps({ seed: { [CONFIG_PATH]: "{not json" } });
     expect(cmdVoiceStatus(d)).toBe(EXIT.FAIL);
     expect(said(d)).toContain("could not be parsed");
+    expect(said(d)).toContain("keeps its last good settings");
     expect(said(d)).not.toContain("nothing configured");
   });
 
@@ -163,6 +164,7 @@ describe("voice status and off", () => {
       const d = deps({ seed: { [CONFIG_PATH]: body } });
       expect(cmdVoiceStatus(d)).toBe(EXIT.FAIL);
       expect(said(d)).toContain("not a settings object");
+      expect(said(d)).toContain("keeps its last good settings");
       expect(said(d)).not.toContain("nothing configured");
       expect(said(d)).not.toContain("(absent)");
     }
@@ -173,6 +175,7 @@ describe("voice status and off", () => {
     expect(cmdVoiceStatus(d)).toBe(EXIT.OK);
     expect(said(d)).toContain("voice mode: on");
     expect(said(d)).toContain("could not be parsed");
+    expect(said(d)).toContain("keeps its last good settings");
   });
 
   test("off does not claim voice is off while the environment still configures it", async () => {

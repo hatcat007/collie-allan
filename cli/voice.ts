@@ -247,6 +247,7 @@ export function cmdVoiceStatus(deps: VoiceDeps): number {
     deps.io.out("voice mode: off — the configuration on this machine cannot be used.");
     for (const line of warnings) deps.io.err(`  ${line}`);
     deps.io.out(`  config    ${path}`);
+    deps.io.out("  note      a running bridge keeps its last good settings until it restarts or the file is fixed");
     return EXIT.FAIL;
   }
   deps.io.out("voice mode: on");
@@ -259,6 +260,9 @@ export function cmdVoiceStatus(deps: VoiceDeps): number {
   // Voice is on through the environment, but the file beside it is broken: say so, because the
   // running bridge may still be reading the last good copy of it.
   for (const line of warnings) deps.io.err(`  warning: ${line}`);
+  if (warnings.length > 0) {
+    deps.io.out("  note      a running bridge keeps its last good settings until it restarts or the file is fixed");
+  }
   return EXIT.OK;
 }
 
