@@ -110,4 +110,24 @@ describe("createVoiceSettingsReader", () => {
     mtime = null;
     expect(await read()).toBeNull();
   });
+
+  test("a file that becomes valid JSON but not an object keeps the last good settings", async () => {
+    let mtime = 1;
+    let text = JSON.stringify({ apiKey: "a" });
+    const w = warnings();
+    const read = createVoiceSettingsReader({
+      stateDir: "/s",
+      warn: w.warn,
+      env: {},
+      io: { mtime: async () => mtime, read: async () => text },
+    });
+    expect((await read())?.apiKey).toBe("a");
+    for (const body of ["null", "[]"]) {
+      mtime += 1;
+      text = body;
+      expect((await read())?.apiKey).toBe("a");
+    }
+    expect(w.seen).toHaveLength(2);
+    expect(w.seen[0]).toContain("not a settings object");
+  });
 });

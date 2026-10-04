@@ -194,7 +194,14 @@ export function createVoiceSettingsReader(opts: {
         try {
           // SAFETY: `JSON.parse` answers with a JSON value and `coerceVoiceFile` is its only reader;
           // every field it names is checked before it is believed.
-          file = coerceVoiceFile(JSON.parse(await io.read(path)) as JsonValue, opts.warn);
+          const parsed = JSON.parse(await io.read(path)) as JsonValue;
+          if (jsonRecord(parsed) === null) {
+            // Valid JSON that is not an object (`null`, a list, a bare string) is as broken as text
+            // that does not parse: keep the last good file rather than turning voice off.
+            opts.warn(`${path} is not a settings object — keeping the last good settings`);
+          } else {
+            file = coerceVoiceFile(parsed, opts.warn);
+          }
         } catch (err) {
           opts.warn(`${path} could not be parsed (${String(err)}) — keeping the last good settings`);
         }
