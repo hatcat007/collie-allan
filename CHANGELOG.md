@@ -30,8 +30,11 @@ PATH. Details and rollback: [`docs/upgrading.md`](./docs/upgrading.md) → *Upgr
 
 ## [Unreleased]
 
+## [1.15.4] - 2026-10-04
+
 ### Added
 
+- **Gemini Live voice mode.** The fork adds a voice relay in the bridge, a `collie voice` verb and a voice sheet with Persona, agent and dictate modes.
 - **Oh My Pi's `/resume` picker is a list of sessions on the phone.** Tap a session and Collie
   moves the pointer to it and presses Enter, in the boxed picker of omp 18.4 and the unboxed one
   before it. On a very large pane the picker stays terminal text with an Escape button. Every other
