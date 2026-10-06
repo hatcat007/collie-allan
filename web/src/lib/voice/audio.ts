@@ -16,8 +16,55 @@ import type { VoiceAudio } from "./session";
 // resample to 16 kHz and encode. Playback: the model's 24 kHz chunks scheduled back to back on one
 // context, every source tracked so a barge-in can stop them at once. Not unit-tested in jsdom, which
 // has no Web Audio; the maths it leans on is (pcm.test.ts) and the rest is checked on a phone.
+// Playback runs through a gain and a limiter, not straight to the destination: with the
+// echo-cancelled microphone open, phones treat the session as a call and play it far quieter than
+// media, and the model's audio is mastered quiet besides.
 
 const WORKLET = "/voice-capture-worklet.js";
+
+/** Makeup gain for the model's voice (~+8 dB). The limiter after it keeps the peaks from clipping. */
+const PLAYBACK_GAIN = 2.5;
+
+declare global {
+  interface Navigator {
+    /** Safari 16.4+ only; lib.dom does not type it yet, and every other browser leaves it absent. */
+    audioSession?: { type: string };
+  }
+}
+
+/**
+ * Ask iOS for the loudspeaker. "play-and-record" maps to PlayAndRecord with DefaultToSpeaker, so the
+ * open microphone no longer sends the model's voice to the earpiece. Elsewhere this does nothing.
+ */
+function setAudioSession(type: string): void {
+  const session = navigator.audioSession;
+  if (session === undefined) return;
+  try {
+    session.type = type;
+  } catch {
+    // a browser that rejects the type keeps its own routing
+  }
+}
+
+/** The speaker context and the node every source plays into: gain, then a limiter, then out. */
+interface Speaker {
+  context: AudioContext;
+  input: GainNode;
+}
+
+function createSpeaker(): Speaker {
+  const context = new AudioContext({ sampleRate: PLAYBACK_RATE });
+  const input = context.createGain();
+  input.gain.value = PLAYBACK_GAIN;
+  const limiter = context.createDynamicsCompressor();
+  limiter.threshold.value = -10;
+  limiter.knee.value = 0;
+  limiter.ratio.value = 20;
+  limiter.attack.value = 0.003;
+  limiter.release.value = 0.1;
+  input.connect(limiter).connect(context.destination);
+  return { context, input };
+}
 
 /** What capture holds. Registered BEFORE the first await, so teardown can release a half-started one. */
 interface Capture {
@@ -43,7 +90,7 @@ function release(held: Capture): void {
 export function createVoiceAudio(): VoiceAudio {
   let capture: Capture | null = null;
   let closed = false;
-  let speaker: AudioContext | null = null;
+  let speaker: Speaker | null = null;
   // The capture context made inside the Start tap, waiting for `startCapture` to take it. It is
   // created there because the microphone prompt and the worklet load are awaits, and a context made
   // after them is not in a gesture any more: mobile browsers leave it suspended and it posts nothing.
@@ -141,24 +188,26 @@ export function createVoiceAudio(): VoiceAudio {
       // it was created or resumed inside a user gesture, and the model's first audio arrives long
       // after the tap, so the speaker is made and unlocked here, not on first play.
       if (closed) return;
-      speaker ??= new AudioContext({ sampleRate: PLAYBACK_RATE });
-      void speaker.resume();
+      setAudioSession("play-and-record");
+      speaker ??= createSpeaker();
+      void speaker.context.resume();
       if (primedCapture === null) {
         primedCapture = new AudioContext();
         void primedCapture.resume();
       }
     },
     play(base64) {
-      speaker ??= new AudioContext({ sampleRate: PLAYBACK_RATE });
-      if (speaker.state === "suspended") void speaker.resume();
+      speaker ??= createSpeaker();
+      const { context, input } = speaker;
+      if (context.state === "suspended") void context.resume();
       const floats = pcm16ToFloat(decode(base64));
       if (floats.length === 0) return;
-      const buffer = speaker.createBuffer(1, floats.length, PLAYBACK_RATE);
+      const buffer = context.createBuffer(1, floats.length, PLAYBACK_RATE);
       buffer.copyToChannel(floats, 0);
-      const source = speaker.createBufferSource();
+      const source = context.createBufferSource();
       source.buffer = buffer;
-      source.connect(speaker.destination);
-      nextStart = Math.max(nextStart, speaker.currentTime);
+      source.connect(input);
+      nextStart = Math.max(nextStart, context.currentTime);
       source.start(nextStart);
       nextStart += buffer.duration;
       active.add(source);
@@ -181,8 +230,9 @@ export function createVoiceAudio(): VoiceAudio {
       stopCapture();
       dropPrimedCapture();
       flush();
-      void speaker?.close();
+      void speaker?.context.close();
       speaker = null;
+      setAudioSession("auto");
     },
   };
 }

@@ -30,6 +30,10 @@ PATH. Details and rollback: [`docs/upgrading.md`](./docs/upgrading.md) → *Upgr
 
 ## [Unreleased]
 
+### Fixed
+
+- **Voice mode's spoken replies play louder on phones.** With the microphone open, phones treated the session as a call and played the model's voice far below media volume. Playback now carries a +8 dB makeup gain behind a limiter that keeps peaks from clipping, and on iOS Safari it asks for the loudspeaker instead of the earpiece.
+
 ## [1.15.4] - 2026-10-04
 
 ### Added

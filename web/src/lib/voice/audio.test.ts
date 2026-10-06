@@ -75,6 +75,9 @@ beforeEach(() => {
       createGain() {
         return { gain: { value: 1 }, connect: (to: FakeNode) => to };
       }
+      createDynamicsCompressor() {
+        return fakeCompressor();
+      }
       resume() {
         contextsResumed += 1;
         return Promise.resolve();
@@ -100,6 +103,19 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.unstubAllGlobals());
+
+// Every param the limiter sets, so the speaker chain can be built against the fake.
+function fakeCompressor() {
+  const param = () => ({ value: 0 });
+  return {
+    threshold: param(),
+    knee: param(),
+    ratio: param(),
+    attack: param(),
+    release: param(),
+    connect: (to: FakeNode) => to,
+  };
+}
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -196,6 +212,8 @@ describe("createVoiceAudio capture teardown", () => {
       destination = {};
       resume() { return Promise.resolve(); }
       close() { return Promise.resolve(); }
+      createGain() { return { gain: { value: 1 }, connect: (to: FakeNode) => to }; }
+      createDynamicsCompressor() { return fakeCompressor(); }
       createBuffer(_c: number, length: number) {
         return { duration: 0, copyToChannel: (data: Float32Array) => void sources.push([...data]), length };
       }
@@ -231,5 +249,50 @@ describe("createVoiceAudio capture teardown", () => {
     await started;
     expect(contextsOpened).toBe(2);
     expect(contextsResumed).toBe(3);
+  });
+
+  test("the model's voice plays through the boosted gain and a limiter, never straight out", () => {
+    const route: string[] = [];
+    let gain = 0;
+    vi.stubGlobal("AudioContext", class {
+      currentTime = 0;
+      state = "running";
+      destination = { name: "destination" };
+      resume() { return Promise.resolve(); }
+      close() { return Promise.resolve(); }
+      createGain() {
+        const node = { name: "gain", gain: { value: 1 }, connect: (to: { name: string }) => {
+          route.push(`gain->${to.name}`);
+          gain = node.gain.value;
+          return to;
+        } };
+        return node;
+      }
+      createDynamicsCompressor() {
+        return { ...fakeCompressor(), name: "limiter", connect: (to: { name: string }) => {
+          route.push(`limiter->${to.name}`);
+          return to;
+        } };
+      }
+      createBuffer() { return { duration: 0, copyToChannel: () => {} }; }
+      createBufferSource() {
+        return { buffer: null, start: () => {}, stop: () => {}, addEventListener: () => {},
+          connect: (to: { name: string }) => void route.push(`source->${to.name}`) };
+      }
+    });
+    const audio = createVoiceAudio();
+    audio.play(btoa(String.fromCharCode(1, 0)));
+    expect(route).toEqual(["gain->limiter", "limiter->destination", "source->gain"]);
+    expect(gain).toBeGreaterThan(1);
+  });
+
+  test("prime asks iOS for the loudspeaker and close hands the route back", () => {
+    const session = { type: "auto" };
+    vi.stubGlobal("navigator", { audioSession: session });
+    const audio = createVoiceAudio();
+    audio.prime();
+    expect(session.type).toBe("play-and-record");
+    audio.close();
+    expect(session.type).toBe("auto");
   });
 });
